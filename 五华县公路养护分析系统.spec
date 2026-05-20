@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='五华县公路养护分析系统',
+    name='公路路况分析系统',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

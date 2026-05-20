@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-粤路公司公路养护需求预测系统 - 主GUI界面
+公路路况分析与养护需求预测系统 - 主GUI界面
 基于tkinter构建，无需额外依赖
 v2.0 - 2026-03-31
 """
@@ -78,7 +78,7 @@ except Exception as e:
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('粤路慧养 v1.5')
+        self.title('路况分析系统 v1.5')
         self.geometry('1200x750')
         self.configure(bg=THEME['bg'])
         
@@ -150,7 +150,7 @@ class App(tk.Tk):
         header.pack(fill='x')
         header.pack_propagate(False)
 
-        tk.Label(header, text='  粤路慧养 v1.5',
+        tk.Label(header, text='  路况分析系统 v1.5',
                  bg=THEME['accent_dark'], fg='white',
                  font=('Microsoft YaHei', 15, 'bold')).pack(side='left', padx=20, pady=15)
 
