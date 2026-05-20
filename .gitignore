@@ -1,0 +1,39 @@
+# Virtual environment
+.venv/
+.trae/
+
+# Build output
+dist/
+build/
+build_repack/
+pack_rebuild.spec
+
+# Output files
+output/
+*.docx
+*.png
+
+# Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# OS files
+.DS_Store
+*.log
+
+# Config
+config.json
+
+# Data
+*.xlsx
+*.xls
+
+# Icon
+road_icon.ico
+
+# ppt-master (external tool)
+ppt-master-main/
