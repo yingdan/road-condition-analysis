@@ -556,7 +556,9 @@ def calc_bcr_ratio(df: pd.DataFrame, maintenance_cost: float,
         return 1.0
     aadt = float(df['交通量'].mean()) if '交通量' in df.columns else 5000
     total_km = float(df['路段长度km'].sum()) if '路段长度km' in df.columns else 1
-    unit_value = 0.5
+    # 单位效益 = 每车每公里因PQI提升1分节约的运营成本(元)
+    # 参考值: 燃油+轮胎+维修 ≈ 0.015元/车/公里/PQI分
+    unit_value = 0.015
     annual_benefit = aadt * 365 * total_km * pqi_improvement * unit_value / 10000
     pv_benefit = sum(annual_benefit / (1 + discount_rate) ** t for t in range(1, analysis_years + 1))
     return pv_benefit / maintenance_cost

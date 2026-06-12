@@ -562,46 +562,64 @@ class App(tk.Tk):
 
         # ── 表1: 等级评价 ──
         self._clear_section('road_type')
-        cols = ('道路类型','指标','均值','优良路率','次差路率','优里程','良里程','中里程','次里程','差里程','评定里程')
-        tf1, tv1 = self._build_section_table(self.tech_sections['road_type'], cols, 5, ws={'道路类型':65,'指标':50,'均值':55,'优良路率':70,'次差路率':70,'优里程':55,'良里程':55,'中里程':55,'次里程':55,'差里程':55,'评定里程':70})
+        cols = ('道路类型','指标','加权均值','优良路率','次差路率','优里程','良里程','中里程','次里程','差里程','评定里程')
+        tf1, tv1 = self._build_section_table(self.tech_sections['road_type'], cols, 5, ws={'道路类型':65,'指标':50,'加权均值':58,'优良路率':68,'次差路率':68,'优里程':55,'良里程':55,'中里程':55,'次里程':55,'差里程':55,'评定里程':68})
+        # 分级阈值: PQI/PCI vs RQI 不同
         for road in ['国道','省道']:
             rd = df[df['道路类型']==road]
+            if rd.empty: continue
             for idx, label in [('PQI','PQI'),('PCI','PCI'),('RQI','RQI')]:
                 if idx not in rd.columns: continue
                 t = rd['路段长度km'].sum()
-                avg = rd[idx].mean() if not rd[idx].isna().all() else 0
-                gr = rd[rd[idx]>=80]['路段长度km'].sum()/t*100 if t>0 else 0
-                br = rd[rd[idx]<70]['路段长度km'].sum()/t*100 if t>0 else 0
-                yl=rd[(rd[idx]>=90)&(rd[idx]<=100)]['路段长度km'].sum()
-                lh=rd[(rd[idx]>=80)&(rd[idx]<90)]['路段长度km'].sum()
-                z=rd[(rd[idx]>=70)&(rd[idx]<80)]['路段长度km'].sum()
-                ci=rd[(rd[idx]>=60)&(rd[idx]<70)]['路段长度km'].sum()
-                ch=rd[rd[idx]<60]['路段长度km'].sum()
-                tv1.insert('','end',values=(road,label,f'{avg:.1f}',f'{gr:.1f}%',f'{br:.1f}%',f'{yl:.1f}',f'{lh:.1f}',f'{z:.1f}',f'{ci:.1f}',f'{ch:.1f}',f'{t:.1f}'))
+                # 加权均值
+                wavg = (rd[idx] * rd['路段长度km']).sum() / t if t > 0 else 0
+                # PQI/PCI/RQI 统一分级: 优≥90 良≥80 中≥70 次≥60 差<60
+                y, l, z, c = 90, 80, 70, 60
+                gr_thr, br_thr = 80, 60          # 优良≥80, 次差<60
+                gr = rd[rd[idx] >= gr_thr]['路段长度km'].sum() / t * 100 if t > 0 else 0
+                br = rd[rd[idx] < br_thr]['路段长度km'].sum() / t * 100 if t > 0 else 0
+                yl = rd[(rd[idx] >= y) & (rd[idx] <= 100)]['路段长度km'].sum()
+                lh = rd[(rd[idx] >= l) & (rd[idx] < y)]['路段长度km'].sum()
+                zh = rd[(rd[idx] >= z) & (rd[idx] < l)]['路段长度km'].sum()
+                ci = rd[(rd[idx] >= c) & (rd[idx] < z)]['路段长度km'].sum()
+                ch = rd[rd[idx] < c]['路段长度km'].sum()
+                tv1.insert('','end',values=(road, label, f'{wavg:.1f}', f'{gr:.1f}%', f'{br:.1f}%',
+                    f'{yl:.1f}', f'{lh:.1f}', f'{zh:.1f}', f'{ci:.1f}', f'{ch:.1f}', f'{t:.1f}'))
         self._build_section_chart(self.tech_sections['road_type'], tv1, 'group_bar', title='国道/省道 × PQI/PCI/RQI 对比')
 
         # ── 表2: 路线评价 ──
         self._clear_section('route')
-        cols2 = ('路线编码','PQI均值','PQI优良路率','PCI均值','PCI优良路率','RQI均值','RQI优良路率')
-        tf2, tv2 = self._build_section_table(self.tech_sections['route'], cols2, 8, ws={'路线编码':90,'PQI均值':75,'PQI优良路率':90,'PCI均值':75,'PCI优良路率':90,'RQI均值':75,'RQI优良路率':90})
+        cols2 = ('路线编码','PQI加权均值','PQI优良路率','PCI加权均值','PCI优良路率','RQI加权均值','RQI优良路率')
+        tf2, tv2 = self._build_section_table(self.tech_sections['route'], cols2, 8, ws={'路线编码':90,'PQI加权均值':85,'PQI优良路率':85,'PCI加权均值':85,'PCI优良路率':85,'RQI加权均值':85,'RQI优良路率':85})
         for rt_code, rd in df.groupby('路线编码'):
             t = rd['路段长度km'].sum()
+            if t == 0: t = 1
             vals = []
-            for idx in ['PQI','PCI','RQI']:
+            for idx, gr_thr in [('PQI',80),('PCI',80),('RQI',80)]:
                 if idx in rd.columns:
-                    avg = rd[idx].mean() if not rd[idx].isna().all() else 0
-                    gr = rd[rd[idx]>=80]['路段长度km'].sum()/t*100 if t>0 else 0
-                    vals += [f'{avg:.1f}', f'{gr:.1f}%']
+                    wavg = (rd[idx] * rd['路段长度km']).sum() / t
+                    gr = rd[rd[idx] >= gr_thr]['路段长度km'].sum() / t * 100
+                    vals += [f'{wavg:.1f}', f'{gr:.1f}%']
                 else:
                     vals += ['-','-']
             tv2.insert('','end',values=(rt_code, *vals))
-        tv2.insert('','end',values=('全路网',*[v for _ in ['PQI','PCI','RQI'] for v in [f"{df['PQI'].mean():.1f}" if 'PQI' in df.columns else '-',f"{df[df['PQI']>=80]['路段长度km'].sum()/df['路段长度km'].sum()*100:.1f}%" if 'PQI' in df.columns else '-']]))
+        # 全路网汇总
+        t_all = df['路段长度km'].sum()
+        overall = []
+        for idx, gr_thr in [('PQI',80),('PCI',80),('RQI',90)]:
+            if idx in df.columns:
+                wavg = (df[idx] * df['路段长度km']).sum() / t_all if t_all > 0 else 0
+                gr = df[df[idx] >= gr_thr]['路段长度km'].sum() / t_all * 100 if t_all > 0 else 0
+                overall += [f'{wavg:.1f}', f'{gr:.1f}%']
+            else:
+                overall += ['-','-']
+        tv2.insert('','end',values=('全路网', *overall))
         self._build_section_chart(self.tech_sections['route'], tv2, 'line', title='各路线PQI/PCI/RQI对比')
 
         # ── 表3: 技术等级 ──
         self._clear_section('tech_grade')
-        cols3 = ('技术等级','PQI均值','PQI优良路率','PCI均值','PCI优良路率','RQI均值','RQI优良路率')
-        tf3, tv3 = self._build_section_table(self.tech_sections['tech_grade'], cols3, 5, ws={'技术等级':85,'PQI均值':80,'PQI优良路率':80,'PCI均值':80,'PCI优良路率':80,'RQI均值':80,'RQI优良路率':80})
+        cols3 = ('技术等级','PQI加权均值','PQI优良路率','PCI加权均值','PCI优良路率','RQI加权均值','RQI优良路率')
+        tf3, tv3 = self._build_section_table(self.tech_sections['tech_grade'], cols3, 5, ws={'技术等级':85,'PQI加权均值':85,'PQI优良路率':80,'PCI加权均值':85,'PCI优良路率':80,'RQI加权均值':85,'RQI优良路率':80})
         grade_map = {'一':'一级公路','二':'二级公路','三':'三级公路','四':'四级公路'}
         for key, grade in grade_map.items():
             rd = df[df['技术等级'].str.contains(key, na=False)] if '技术等级' in df.columns else pd.DataFrame()
@@ -610,17 +628,20 @@ class App(tk.Tk):
             t = rd['路段长度km'].sum()
             if t == 0: t = 1
             vals = []
-            for idx in ['PQI','PCI','RQI']:
-                avg = rd[idx].mean() if idx in rd.columns and not rd[idx].isna().all() else 0
-                gr = rd[rd[idx]>=80]['路段长度km'].sum()/t*100 if t>0 else 0
-                vals += [f'{avg:.1f}',f'{gr:.1f}%']
+            for idx, gr_thr in [('PQI',80),('PCI',80),('RQI',90)]:
+                if idx in rd.columns and not rd[idx].isna().all():
+                    wavg = (rd[idx] * rd['路段长度km']).sum() / t
+                    gr = rd[rd[idx] >= gr_thr]['路段长度km'].sum() / t * 100
+                    vals += [f'{wavg:.1f}', f'{gr:.1f}%']
+                else:
+                    vals += ['-','-']
             tv3.insert('','end',values=(grade, *vals))
         if not tv3.get_children():
             t = df['路段长度km'].sum(); t = t if t>0 else 1
-            for idx in ['PQI','PCI','RQI']:
-                avg = df[idx].mean() if idx in df.columns and not df[idx].isna().all() else 0
-                gr = df[df[idx]>=80]['路段长度km'].sum()/t*100 if t>0 else 0
-                tv3.insert('','end',values=('全路网', f'{avg:.1f}',f'{gr:.1f}%', '-','-', '-','-'))
+            for idx, gr_thr in [('PQI',80),('PCI',80),('RQI',80)]:
+                wavg = (df[idx] * df['路段长度km']).sum() / t if idx in df.columns else 0
+                gr = df[df[idx] >= gr_thr]['路段长度km'].sum() / t * 100 if idx in df.columns and t>0 else 0
+                tv3.insert('','end',values=('全路网', f'{wavg:.1f}',f'{gr:.1f}%', '-','-', '-','-'))
         self._build_section_chart(self.tech_sections['tech_grade'], tv3, 'combo', title='技术等级对比')
 
         # ── 表4: 年度趋势 ──
@@ -637,9 +658,9 @@ class App(tk.Tk):
             if yd.empty: continue
             t = yd['路段长度km'].sum()
             if t == 0: t = 1
-            pqim = yd['PQI'].mean() if 'PQI' in yd.columns else 0
-            pcim = yd['PCI'].mean() if 'PCI' in yd.columns else 0
-            rqim = yd['RQI'].mean() if 'RQI' in yd.columns else 0
+            pqim = (yd['PQI'] * yd['路段长度km']).sum() / t if 'PQI' in yd.columns else 0
+            pcim = (yd['PCI'] * yd['路段长度km']).sum() / t if 'PCI' in yd.columns else 0
+            rqim = (yd['RQI'] * yd['路段长度km']).sum() / t if 'RQI' in yd.columns else 0
             gr = yd[yd['PQI']>=80]['路段长度km'].sum()/t*100 if 'PQI' in yd.columns and t>0 else 0
             tv4.insert('','end',values=(yi, f'{pqim:.1f}', f'{pcim:.1f}', f'{rqim:.1f}', f'{gr:.1f}%'))
         self._build_section_chart(self.tech_sections['year'], tv4, 'line', title='年度趋势')
@@ -864,9 +885,12 @@ class App(tk.Tk):
             for label, suffix, dv in [('B/C','BCR',default_targets[hkey]['国道_BCR']),
                                        ('成本万/km','km成本',default_targets[hkey]['国道_km成本'])]:
                 tk.Label(grd, text=f'{label} ', bg=self._bg(gd), font=('Microsoft YaHei',9)).pack(side='left')
-                v = tk.IntVar(value=int(dv*100)) if suffix=='BCR' else tk.IntVar(value=dv)
+                if suffix == 'BCR':
+                    v = tk.StringVar(value=str(dv))  # 直接存"1.2"而非120
+                else:
+                    v = tk.IntVar(value=dv)
                 self.target_vars[f'{hkey}_国道_{suffix}'] = v
-                w = 4 if suffix=='BCR' else 5
+                w = 5
                 ttk.Entry(grd, textvariable=v, width=w, font=('Microsoft YaHei',9)).pack(side='left', padx=(0,8))
             # 省道
             sd = ttk.LabelFrame(r, text='普通省道', padding=5)
@@ -884,9 +908,12 @@ class App(tk.Tk):
             for label, suffix, dv in [('B/C','BCR',default_targets[hkey]['省道_BCR']),
                                        ('成本万/km','km成本',default_targets[hkey]['省道_km成本'])]:
                 tk.Label(srd, text=f'{label} ', bg=self._bg(sd), font=('Microsoft YaHei',9)).pack(side='left')
-                v = tk.IntVar(value=int(dv*100)) if suffix=='BCR' else tk.IntVar(value=dv)
+                if suffix == 'BCR':
+                    v = tk.StringVar(value=str(dv))
+                else:
+                    v = tk.IntVar(value=dv)
                 self.target_vars[f'{hkey}_省道_{suffix}'] = v
-                w = 4 if suffix=='BCR' else 5
+                w = 5
                 ttk.Entry(srd, textvariable=v, width=w, font=('Microsoft YaHei',9)).pack(side='left', padx=(0,8))
 
         # 按钮 + 对比表
@@ -933,12 +960,15 @@ class App(tk.Tk):
             w_pqi = (rd['PQI'] * rd['路段长度km']).sum() / t if t>0 else 0
             good_len = rd[rd['PQI']>=80]['路段长度km'].sum() if 'PQI' in rd.columns else 0
             good_rate = good_len/t*100 if t>0 else 0
-            # 经济指标(估算)
+            # 经济指标(年均养护成本估算)
             width = rd['路面宽度'].mean() if '路面宽度' in rd.columns else 7
-            est_cost = t * 1000 * width * 300 / 10000  # 估算养护投资(万元)
+            # 年均养护成本 = 日常保养 + 预防 + 改造 按比例加权
+            # 日常30元/m² × 80% + 预防160元/m² × 15% + 改造319元/m² × 5%
+            avg_unit = 30*0.8 + 160*0.15 + 319*0.05  # ≈ 64元/m²
+            annual_cost = t * 1000 * width * avg_unit / 10000  # 年养护费(万元)
+            km_cost = annual_cost / t  # 每公里年均成本(万元/km)
             from src.decision.cost_model import calc_bcr_ratio
-            bcr = calc_bcr_ratio(rd, est_cost) if est_cost>0 else 0
-            km_cost = est_cost / t if t>0 else 0
+            bcr = calc_bcr_ratio(rd, annual_cost) if annual_cost>0 else 0
 
             for metric, cur_val, suffix in [
                 ('加权PQI', w_pqi, 'PQI'), ('优良路率(%)', good_rate, '优良路率'),
@@ -947,12 +977,12 @@ class App(tk.Tk):
                 short_t = self.target_vars.get(f'short_{road}_{suffix}', tk.IntVar(value=0)).get()
                 mid_t   = self.target_vars.get(f'mid_{road}_{suffix}', tk.IntVar(value=0)).get()
                 long_t  = self.target_vars.get(f'long_{road}_{suffix}', tk.IntVar(value=0)).get()
-                # B/C值以百分存储(×100)，需除以100显示
+                # B/C值直接显示（StringVar存储）
                 if suffix == 'BCR':
                     cur_fmt = f'{cur_val:.2f}'
-                    s_fmt = f'{short_t/100:.2f}'
-                    m_fmt = f'{mid_t/100:.2f}'
-                    l_fmt = f'{long_t/100:.2f}'
+                    s_fmt = f'{float(short_t):.2f}'
+                    m_fmt = f'{float(mid_t):.2f}'
+                    l_fmt = f'{float(long_t):.2f}'
                 else:
                     cur_fmt = f'{cur_val:.1f}'; s_fmt = f'{short_t}'; m_fmt = f'{mid_t}'; l_fmt = f'{long_t}'
                 self.target_tree.insert('','end',values=('技术/经济',road,metric,cur_fmt,s_fmt,m_fmt,l_fmt))
