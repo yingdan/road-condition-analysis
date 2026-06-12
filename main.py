@@ -1,3360 +1,1624 @@
 # -*- coding: utf-8 -*-
 """
-公路路况分析与养护需求预测系统 - 主GUI界面
-基于tkinter构建，无需额外依赖
-v2.0 - 2026-03-31
+公路养护决策系统 — 粤路慧养 v2.0
+流程：数据评定→目标→对策→需求/预算/资金→项目库→效益评估→反馈调整
 """
-
-import os
-import sys
-import json
+import os, sys, json, random
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import pandas as pd
 
-# ── 路径处理（兼容打包后的exe）──
 def get_base_dir():
-    if getattr(sys, 'frozen', False):
-        return os.path.dirname(sys.executable)
+    if getattr(sys, 'frozen', False): return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
-
 BASE_DIR = get_base_dir()
-
-# 打包后src在_internal目录下
 SRC_DIR = os.path.join(BASE_DIR, 'src')
-if not os.path.exists(SRC_DIR):
-    SRC_DIR = os.path.join(BASE_DIR, '_internal', 'src')
-if not os.path.exists(SRC_DIR):
-    SRC_DIR = BASE_DIR
+if not os.path.exists(SRC_DIR): SRC_DIR = os.path.join(BASE_DIR, '_internal', 'src')
+sys.path.insert(0, SRC_DIR)
+CONFIG_PATH = os.path.join(BASE_DIR, 'config.json')
 
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
-
-# 配置文件路径（确保在EXE所在目录，而不是临时目录）
-if getattr(sys, 'frozen', False):
-    # 打包后的EXE路径
-    CONFIG_PATH = os.path.join(os.path.dirname(sys.executable), 'config.json')
-else:
-    # 开发模式下的路径
-    CONFIG_PATH = os.path.join(BASE_DIR, 'config.json')
-
-# ── 颜色主题 ──
+# ── 颜色主题（现代化配色）──
 THEME = {
-    'bg': '#F0F4F8',
-    'sidebar': '#1E3A5F',
-    'sidebar_hover': '#2E5F9F',
-    'accent': '#2E75B6',
-    'accent_dark': '#1F497D',
-    'success': '#27AE60',
-    'warning': '#F39C12',
-    'danger': '#E74C3C',
+    'bg': '#F5F7FA',              # 主背景
+    'sidebar': '#2E75B6',          # 侧边栏浅蓝
+    'sidebar_active': '#1F497D',   # 当前步骤深蓝
+    'sidebar_done': '#27AE60',     # 已完成步骤
+    'sidebar_hover': '#3D8BD0',   # 悬停（微亮）
+    'sidebar_hover_border': '#FFFFFF',  # 悬停左侧指示线
+    'accent': '#2E75B6',           # 主色调
+    'accent_light': '#E8F0FE',     # 浅色
+    'success': '#219A52',          # 成功绿
+    'warning': '#E67E22',          # 警告橙
+    'danger': '#C0392B',           # 危险红
     'text': '#2C3E50',
     'text_light': '#7F8C8D',
     'card': '#FFFFFF',
-    'border': '#DEE2E6',
+    'card_border': '#E1E5EB',
+    'divider': '#EDF0F4',
 }
 
-# ── 尝试导入分析模块 ──
+# ── 图表导出辅助 ──
+class ExportHelper:
+    @staticmethod
+    def export(fig):
+        from tkinter import filedialog, messagebox
+        path = filedialog.asksaveasfilename(title='导出图表', defaultextension='.png',
+                                            filetypes=[('PNG','*.png'),('PDF','*.pdf')], initialfile='chart.png')
+        if path: fig.savefig(path, dpi=150, bbox_inches='tight'); messagebox.showinfo('成功','图表已导出')
+
+# ── 导入 ──
 try:
-    from src.analyzer import generate_all_charts
     from src.data_loader import load_all_data
-    from src.report_writer import generate_word_report
-    from src.decay_calculator import get_maintenance_callback, set_maintenance_callback
-    from src.decay_calculator import get_trigger_model, set_trigger_model
+    from src.decay_calculator import (get_maintenance_callback, set_maintenance_callback,
+                                       get_trigger_model, set_trigger_model)
+    from src.decision.performance_models import calibrate_model
+    from src.decision.maintenance_demand import analyze_demand
+    from src.decision.budget_allocation import priority_allocation
+    from src.decision.project_pool import ProjectPool, MaintenanceProject
+    from src.decision.benefit_analysis import generate_benefit_report
 except Exception as e:
-    print(f"导入模块失败: {e}")
-    import traceback
-    traceback.print_exc()
-    load_all_data = None
-    generate_all_charts = None
-    generate_word_report = None
-    get_maintenance_callback = None
-    set_maintenance_callback = None
-    get_trigger_model = None
-    set_trigger_model = None
-    set_maintenance_callback = None
+    print(f"Import failed: {e}")
+    for obj in ['load_all_data','calibrate_model','analyze_demand','priority_allocation',
+                'ProjectPool','MaintenanceProject','generate_benefit_report',
+                'get_maintenance_callback','set_maintenance_callback','get_trigger_model','set_trigger_model']:
+        globals()[obj] = None
+
+# ── 侧边栏步骤定义 ──
+STEPS = [
+    {'num': 1, 'label': '数据管理',     'desc': '加载和筛选数据'},
+    {'num': 2, 'label': '现状评定',     'desc': '技术状况评价'},
+    {'num': 3, 'label': '目标设定',     'desc': '养护目标配置'},
+    {'num': 4, 'label': '预测模型',     'desc': '衰减率与预测'},
+    {'num': 5, 'label': '养护对策',     'desc': '阈值/回调/单价'},
+    {'num': 6, 'label': '需求分析',     'desc': '养护需求与排序'},
+    {'num': 7, 'label': '预算资金',     'desc': '资金优化分配'},
+    {'num': 8, 'label': '项目库',       'desc': '中长期规划'},
+    {'num': 9, 'label': '效益评估',     'desc': '评估与反馈'},
+    {'num': 10,'label': 'GIS地图',      'desc': '路况可视化地图'},
+]
 
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('路况分析系统 v1.5')
-        self.geometry('1200x750')
+        self.title('粤路慧养 v2.0 — 公路养护决策系统')
+        self.geometry('1280x820')
+        self.minsize(1000, 650)
         self.configure(bg=THEME['bg'])
-        
-        # 设置窗口图标
-        icon_path = os.path.join(os.path.dirname(__file__), 'road_icon.ico')
-        if os.path.exists(icon_path):
-            self.iconbitmap(icon_path)
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=1)
 
-        # 数据存储
-        self.data_cache = {}
-        self.filtered_df = None
+        # 图标
+        ip = os.path.join(BASE_DIR, 'road_icon.ico')
+        if os.path.exists(ip): self.iconbitmap(ip)
 
-        # 加载配置
+        # 数据
+        self.data_cache = {}; self.filtered_df = None; self.demand_result_df = None
+        self.project_pool = ProjectPool() if ProjectPool else None
         self.config = self._load_config()
-
-        # UI变量
-        self.llm_vars = {}
-        self.llm_key_entry = None
-        self.llm_key_toggle_btn = None
-        self._llm_key_visible = False
-
-        # 加载保存的养护回调参数（如果有）——必须在构建UI之前调用
         self._load_saved_callback()
 
         self._setup_style()
-        self._build_ui()
+        self._build_sidebar()
+        self._build_content_area()
+
+        # 默认选中步骤1
+        self._switch_step(1)
 
     def _load_config(self):
         if os.path.exists(CONFIG_PATH):
             try:
-                with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except:
-                pass
+                with open(CONFIG_PATH, 'r', encoding='utf-8') as f: return json.load(f)
+            except: pass
         return {}
 
     def _load_saved_callback(self):
-        """加载保存的养护回调参数"""
-        if not set_maintenance_callback:
-            return
-        
-        saved_callback = self.config.get('maintenance_callback')
-        if saved_callback:
-            try:
-                set_maintenance_callback(saved_callback)
-                print(f"已加载保存的养护回调参数")
-            except Exception as e:
-                print(f"加载养护回调参数失败: {e}")
+        if set_maintenance_callback and self.config.get('maintenance_callback'):
+            set_maintenance_callback(self.config['maintenance_callback'])
 
     def _setup_style(self):
-        style = ttk.Style()
-        style.theme_use('clam')
+        s = ttk.Style(); s.theme_use('clam')
+        s.configure('.', background=THEME['bg'], font=('Microsoft YaHei', 9))
+        s.configure('Card.TFrame', background=THEME['card'], relief='solid', borderwidth=1)
+        s.configure('Title.TLabel', font=('Microsoft YaHei', 15, 'bold'), foreground=THEME['text'])
+        s.configure('Sub.TLabel', font=('Microsoft YaHei', 9), foreground=THEME['text_light'])
+        s.configure('TNotebook', background=THEME['bg'])
+        s.configure('TNotebook.Tab', font=('Microsoft YaHei', 10), padding=(10, 5))
+        s.configure('TLabelframe', background=THEME['card'])
+        s.configure('TLabelframe.Label', font=('Microsoft YaHei', 10, 'bold'), foreground=THEME['text'])
 
-        style.configure('Title.TLabel', font=('Microsoft YaHei', 14, 'bold'), foreground=THEME['text'])
-        style.configure('Subtitle.TLabel', font=('Microsoft YaHei', 9), foreground=THEME['text_light'])
-        style.configure('Card.TFrame', background=THEME['card'])
-        style.configure('Primary.TButton', font=('Microsoft YaHei', 10), background=THEME['accent'], foreground='white')
-        style.map('Primary.TButton', background=[('active', THEME['accent_dark'])])
-        style.configure('Success.TButton', background=[('active', '#219A52')])
-        style.configure('TEntry', fieldbackground='white', font=('Microsoft YaHei', 10))
-        style.configure('TCombobox', fieldbackground='white', font=('Microsoft YaHei', 10))
-        style.configure('TNotebook', background=THEME['bg'])
-        style.configure('TNotebook.Tab', font=('Microsoft YaHei', 10), padding=(12, 6))
-        style.configure('TProgressbar', troughcolor=THEME['border'], background=THEME['accent'])
-    
-    def _build_ui(self):
-        # 顶部Banner
-        header = tk.Frame(self, bg=THEME['accent_dark'], height=60)
-        header.pack(fill='x')
-        header.pack_propagate(False)
+    # ══════════════════════════════════════════════════════════════════════════
+    #  左侧边栏
+    # ══════════════════════════════════════════════════════════════════════════
+    def _build_sidebar(self):
+        self.sidebar = tk.Frame(self, bg=THEME['sidebar'], width=200)
+        self.sidebar.grid(row=0, column=0, sticky='ns')
+        self.sidebar.grid_propagate(False)
 
-        tk.Label(header, text='  路况分析系统 v1.5',
-                 bg=THEME['accent_dark'], fg='white',
-                 font=('Microsoft YaHei', 15, 'bold')).pack(side='left', padx=20, pady=15)
+        # Logo区域
+        logo = tk.Frame(self.sidebar, bg=THEME['sidebar'], height=100)
+        logo.pack(fill='x'); logo.pack_propagate(False)
+        tk.Label(logo, text='粤路慧养', bg=THEME['sidebar'], fg='white',
+                 font=('Microsoft YaHei', 20, 'bold')).pack(pady=(25,2))
+        tk.Label(logo, text='公路养护决策系统 v2.0', bg=THEME['sidebar'], fg='#D0E0F0',
+                 font=('Microsoft YaHei', 9)).pack()
 
-        main = ttk.Frame(self)
-        main.pack(fill='both', expand=True, padx=0, pady=0)
-        
-        # Tab切换
-        self.notebook = ttk.Notebook(main)
-        self.notebook.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        # Tab 1: 数据配置
-        self.tab_data = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_data, text='  数据配置  ')
-        self._build_data_tab(self.tab_data)
-        
-        # Tab 2: 数据筛选
-        self.tab_filter = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_filter, text='  数据筛选  ')
-        self._build_filter_tab(self.tab_filter)
+        tk.Frame(self.sidebar, bg=THEME['sidebar_active'], height=1).pack(fill='x', padx=15)
 
-        # Tab 2.5: 数据分析（衰减模型）
-        self.tab_model = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_model, text='  数据分析  ')
-        self._build_model_info_tab(self.tab_model)
-        
-        # Tab 3: 分析与图表
-        self.tab_analysis = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_analysis, text='  分析图表  ')
-        self._build_analysis_tab(self.tab_analysis)
-        
-        # Tab 4: AI报告配置
-        self.tab_llm = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_llm, text='  AI报告  ')
-        self._build_llm_tab(self.tab_llm)
-        
-        # Tab 5: 生成报告
-        self.tab_report = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_report, text='  生成报告  ')
-        self._build_report_tab(self.tab_report)
-        
-        # ── 底部状态栏 ──
-        self.status_var = tk.StringVar(value='就绪')
-        footer = tk.Frame(self, bg=THEME['border'], height=30)
-        footer.pack(fill='x')
+        # 步骤列表
+        steps_frame = tk.Frame(self.sidebar, bg=THEME['sidebar'])
+        steps_frame.pack(fill='both', expand=True, padx=0, pady=10)
+
+        self.step_buttons = {}
+        self.step_indicators = {}
+        for s in STEPS:
+            btn_frame = tk.Frame(steps_frame, bg=THEME['sidebar'], cursor='hand2')
+            btn_frame.pack(fill='x', pady=1)
+
+            # 状态指示器
+            indicator = tk.Canvas(btn_frame, width=8, height=8, bg=THEME['sidebar'],
+                                  highlightthickness=0)
+            indicator.pack(side='left', padx=(18, 8), pady=18)
+            indicator.create_oval(1, 1, 7, 7, fill='#7AB8E0', outline='')
+            self.step_indicators[s['num']] = indicator
+
+            # 文字
+            txt = tk.Label(btn_frame, text=f"  {s['num']}. {s['label']}",
+                          bg=THEME['sidebar'], fg='white', font=('Microsoft YaHei', 10),
+                          anchor='w', cursor='hand2')
+            txt.pack(side='left', fill='x', expand=True, pady=10)
+            self.step_buttons[s['num']] = txt
+
+            # 事件：悬停时帧+文字+指示器一起变色
+            def on_enter(e, f=btn_frame, t=txt, ind=indicator, n=s['num']):
+                if not hasattr(self, '_active_step') or self._active_step != n:
+                    f.configure(bg=THEME['sidebar_hover'])
+                    t.configure(bg=THEME['sidebar_hover'])
+                    ind.configure(bg=THEME['sidebar_hover'])
+
+            def on_leave(e, f=btn_frame, t=txt, ind=indicator, n=s['num']):
+                if not hasattr(self, '_active_step') or self._active_step != n:
+                    f.configure(bg=THEME['sidebar'])
+                    t.configure(bg=THEME['sidebar'])
+                    ind.configure(bg=THEME['sidebar'])
+
+            for w in [btn_frame, txt]:
+                w.bind('<Button-1>', lambda e, n=s['num']: self._switch_step(n))
+                w.bind('<Enter>', on_enter)
+                w.bind('<Leave>', on_leave)
+
+        # 底部状态
+        tk.Frame(self.sidebar, bg=THEME['sidebar_active'], height=1).pack(fill='x', padx=15)
+        btm = tk.Frame(self.sidebar, bg=THEME['sidebar'], height=50)
+        btm.pack(fill='x', pady=10)
+        self.sidebar_status = tk.Label(btm, text='准备就绪', bg=THEME['sidebar'], fg='#D0E0F0',
+                                        font=('Microsoft YaHei', 9))
+        self.sidebar_status.pack()
+
+    def _switch_step(self, step_num):
+        """切换当前步骤"""
+        self._active_step = step_num
+        # 更新侧边栏高亮
+        for n, btn in self.step_buttons.items():
+            if n == step_num:
+                btn.config(fg='white', font=('Microsoft YaHei', 10, 'bold'), bg=THEME['sidebar_active'])
+                btn.master.configure(bg=THEME['sidebar_active'])
+                self.step_indicators[n].configure(bg=THEME['sidebar_active'])
+                self.step_indicators[n].delete('all')
+                self.step_indicators[n].create_oval(1, 1, 7, 7, fill='white', outline='white')
+            else:
+                btn.config(fg='#D0E0F0', font=('Microsoft YaHei', 10), bg=THEME['sidebar'])
+                btn.master.configure(bg=THEME['sidebar'])
+                self.step_indicators[n].configure(bg=THEME['sidebar'])
+                self.step_indicators[n].delete('all')
+                if hasattr(self, 'completed_steps') and n in self.completed_steps:
+                    self.step_indicators[n].create_oval(1, 1, 7, 7, fill=THEME['success'], outline=THEME['success'])
+                else:
+                    self.step_indicators[n].create_oval(1, 1, 7, 7, fill='#5A9BD5', outline='')
+
+        # 隐藏所有页面（footer 除外，它始终在底部）
+        current = getattr(self, '_current_page', None)
+        if current is not None:
+            current.pack_forget()
+
+        # 显示对应内容（footer 之前）
+        page = getattr(self, f'_page{step_num}')
+        page.pack(fill='both', expand=True, before=self.content_footer)
+        self._current_page = page
+
+        # 更新侧边栏状态
+        s = STEPS[step_num-1]
+        self.sidebar_status.config(text=f'{s["label"]} — {s["desc"]}')
+
+    def mark_step_done(self, step_num):
+        """标记步骤完成"""
+        if not hasattr(self, 'completed_steps'):
+            self.completed_steps = set()
+        self.completed_steps.add(step_num)
+        self.step_indicators[step_num].delete('all')
+        self.step_indicators[step_num].configure(bg=THEME['sidebar'])
+        self.step_indicators[step_num].create_oval(1, 1, 7, 7, fill=THEME['success'], outline=THEME['success'])
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  右侧内容区
+    # ══════════════════════════════════════════════════════════════════════════
+    def _build_content_area(self):
+        self.content_area = tk.Frame(self, bg=THEME['bg'])
+        self.content_area.grid(row=0, column=1, sticky='nsew')
+
+        # 创建10个页面的容器Frame
+        for i in range(1, 11):
+            page = tk.Frame(self.content_area, bg=THEME['bg'])
+            setattr(self, f'_page{i}', page)
+            # 构建对应内容
+            getattr(self, f'_build_page{i}')(page)
+
+        # 底部状态栏
+        self.content_footer = tk.Frame(self.content_area, bg=THEME['card_border'], height=28)
+        self.content_footer.pack(side='bottom', fill='x')
+        footer = self.content_footer
         footer.pack_propagate(False)
-        
-        tk.Label(footer, textvariable=self.status_var, bg=THEME['border'],
-                 font=('Microsoft YaHei', 9), anchor='w').pack(side='left', padx=10)
-        
-        self.progressbar = ttk.Progressbar(footer, mode='indeterminate', length=150)
-        self.progressbar.pack(side='right', padx=10, pady=4)
+        self.status_var = tk.StringVar(value='就绪 — 请先加载数据')
+        tk.Label(footer, textvariable=self.status_var, bg=THEME['card_border'],
+                 font=('Microsoft YaHei', 9), anchor='w').pack(side='left', padx=15)
 
-    # ════════════════════════════════════════
-    # Tab 1: 数据配置
-    # ════════════════════════════════════════
-    def _build_data_tab(self, parent):
-        frame = ttk.Frame(parent)
-        frame.pack(fill='both', expand=True, padx=20, pady=20)
-        
-        ttk.Label(frame, text='数据文件配置', style='Title.TLabel').pack(anchor='w')
-        ttk.Label(frame, text='配置各年份Excel文件路径，建议按年份分表存放', style='Subtitle.TLabel').pack(anchor='w', pady=(0, 15))
+    # ── 通用卡片容器 ──
+    def _card(self, parent, title='', pady=8, expand=False):
+        """创建标准卡片容器"""
+        f = tk.Frame(parent, bg=THEME['card'], highlightbackground=THEME['card_border'],
+                     highlightthickness=1, padx=20, pady=15)
+        f.pack(fill='both' if expand else 'x', expand=expand, padx=20, pady=pady)
+        if title:
+            tk.Label(f, text=title, bg=THEME['card'], fg=THEME['text'],
+                    font=('Microsoft YaHei', 12, 'bold'), anchor='w').pack(fill='x', pady=(0,10))
+        return f
 
-        # 文件配置卡片
-        file_card = ttk.LabelFrame(frame, text='数据文件', padding=15)
-        file_card.pack(fill='x')
+    def _bg(self, widget):
+        """安全获取widget背景色"""
+        try: return widget.cget('background')
+        except:
+            try: return widget.cget('bg')
+            except: return THEME['card']
+
+    def _row(self, parent, pady=5):
+        f = tk.Frame(parent, bg=self._bg(parent), highlightthickness=0)
+        f.pack(fill='x', pady=pady)
+        return f
+
+    def _section_title(self, parent, text):
+        tk.Label(parent, text=text, bg=self._bg(parent), fg=THEME['text'],
+                font=('Microsoft YaHei', 14, 'bold')).pack(anchor='w', pady=(15,3))
+
+    def _section_sub(self, parent, text):
+        tk.Label(parent, text=text, bg=self._bg(parent), fg=THEME['text_light'],
+                font=('Microsoft YaHei', 9)).pack(anchor='w', pady=(0,10))
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  页面1: 数据管理 (Excel智能识别 + 数据库连接)
+    # ══════════════════════════════════════════════════════════════════════════
+    def _build_page1(self, parent):
+        # 可滚动
+        cvs = tk.Canvas(parent, bg=THEME['bg'], highlightthickness=0)
+        sv_bar = ttk.Scrollbar(parent, orient='vertical', command=cvs.yview)
+        cvs.configure(yscrollcommand=sv_bar.set)
+        sv_bar.pack(side='right', fill='y'); cvs.pack(side='left', fill='both', expand=True)
+        sf = tk.Frame(cvs, bg=THEME['bg'])
+        win_id = cvs.create_window((0,0), window=sf, anchor='nw', tags=('sframe',))
+        def _on_cvs_cfg(e):
+            cvs.itemconfig(win_id, width=e.width)
+            cvs.configure(scrollregion=cvs.bbox('all'))
+        cvs.bind('<Configure>', _on_cvs_cfg)
+        sf.bind('<Configure>', lambda e: cvs.configure(scrollregion=cvs.bbox('all')))
+
+        self._section_title(sf, '📂 数据管理')
+        self._section_sub(sf, 'Excel智能识别导入 + PostgreSQL/PostGIS数据库连接')
+
+        # ── Excel智能识别导入 ──
+        card = self._card(sf, '📁 Excel智能识别导入')
+        tk.Label(card, text='支持自动识别文件年份和Sheet名称，智能匹配列名映射',
+                 bg=THEME['card'], fg=THEME['text_light'], font=('Microsoft YaHei', 9)).pack(anchor='w', pady=(0,8))
 
         self.file_vars = {}
-        years = [2021, 2022, 2023, 2024, 2025]
-        
-        for year in years:
-            row = ttk.Frame(file_card)
-            row.pack(fill='x', pady=3)
-            
-            tk.Label(row, text=f'{year}年：', width=8).pack(side='left')
-            
-            var = tk.StringVar()
-            self.file_vars[year] = var
-            
-            ttk.Entry(row, textvariable=var, width=45).pack(side='left', padx=5)
-            ttk.Button(row, text='浏览', command=lambda y=year: self._browse_file(y),
-                      width=8).pack(side='left')
-        
-        # 批量浏览按钮（放在数据文件框内）
-        batch_row = ttk.Frame(file_card)
-        batch_row.pack(fill='x', pady=(10, 0))
-        tk.Button(batch_row, text='📂 批量浏览（自动匹配年份）', command=self._browse_files_multi,
-                   bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9),
-                   padx=10, pady=3, cursor='hand2').pack(side='left')
+        for year in [2021, 2022, 2023, 2024, 2025]:
+            r = self._row(card, 4)
+            tk.Label(r, text=f'{year}年', width=8, bg=THEME['card'],
+                    font=('Microsoft YaHei', 9, 'bold')).pack(side='left')
+            self.file_vars[year] = tk.StringVar()
+            ttk.Entry(r, textvariable=self.file_vars[year], width=40, font=('Microsoft YaHei', 9)).pack(side='left', padx=8)
+            tk.Button(r, text='浏览', command=lambda y=year: self._browse_file(y),
+                     bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9), padx=8, cursor='hand2').pack(side='left')
 
-        # 自动加载已有数据
+        r = self._row(card, 6)
+        tk.Button(r, text='📂 批量识别', command=self._browse_folder,
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9), padx=12, cursor='hand2').pack(side='left', padx=3)
+        tk.Button(r, text='🚀 加载数据', command=self._load_data,
+                 bg=THEME['success'], fg='white', font=('Microsoft YaHei', 10, 'bold'),
+                 padx=15, pady=3, cursor='hand2').pack(side='left', padx=5)
+        self.load_info = tk.Label(r, text='点击"批量识别"或逐项选择文件后加载', bg=THEME['card'],
+                                  fg=THEME['text_light'], font=('Microsoft YaHei', 9))
+        self.load_info.pack(side='left', padx=10)
+
+        # ── 数据库连接 ──
+        card_db = self._card(sf, '🗄️ 数据库连接 (PostgreSQL/PostGIS)')
+        r1 = self._row(card_db, 3)
+        for lbl, v, w in [('Host','localhost',14),('Port','5432',6),('DB','road_maintenance',14)]:
+            tk.Label(r1, text=lbl+':', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left', padx=(0,2))
+            setattr(self, f'db_{lbl.lower()}_var', tk.StringVar(value=v))
+            ttk.Entry(r1, textvariable=getattr(self, f'db_{lbl.lower()}_var'), width=w, font=('Microsoft YaHei', 9)).pack(side='left', padx=(0,8))
+        r2 = self._row(card_db, 3)
+        for lbl, v, w in [('User','postgres',14),('Pass','',14)]:
+            tk.Label(r2, text=lbl+':', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left', padx=(0,2))
+            setattr(self, f'db_{lbl.lower()}_var', tk.StringVar(value=v))
+            ttk.Entry(r2, textvariable=getattr(self, f'db_{lbl.lower()}_var'), width=w,
+                      show='*' if lbl=='Pass' else '', font=('Microsoft YaHei', 9)).pack(side='left', padx=(0,8))
+        r3 = self._row(card_db, 5)
+        tk.Button(r3, text='🔌 连接数据库', command=self._db_connect,
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9), padx=10, cursor='hand2').pack(side='left', padx=3)
+        self.db_status = tk.Label(r3, text='未连接', bg=THEME['card'], fg=THEME['text_light'], font=('Microsoft YaHei', 9))
+        self.db_status.pack(side='left', padx=10)
+        tk.Button(r3, text='初始化表', command=self._db_init, font=('Microsoft YaHei', 9)).pack(side='left', padx=3)
+        tk.Button(r3, text='同步到数据库', command=self._db_sync, font=('Microsoft YaHei', 9)).pack(side='left', padx=3)
+        self.db_text = tk.Text(card_db, height=3, wrap='word', font=('Consolas', 8))
+        self.db_text.pack(fill='x', pady=(5,0))
+
+        # ── 数据筛选 ──
+        card2 = self._card(sf, '🔎 数据筛选与预览', expand=True)
+        r1 = self._row(card2, 4)
+        tk.Label(r1, text='县份', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left', padx=(0,3))
+        self.filter_county_var = tk.StringVar(value='全部')
+        self.filter_county_cb = ttk.Combobox(r1, textvariable=self.filter_county_var, width=10, state='readonly', values=['全部'])
+        self.filter_county_cb.pack(side='left')
+        tk.Label(r1, text='年份', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left', padx=(10,3))
+        self.filter_year_var = tk.StringVar(value='全部')
+        self.filter_year_cb = ttk.Combobox(r1, textvariable=self.filter_year_var, width=6, state='readonly', values=['全部'])
+        self.filter_year_cb.pack(side='left')
+        tk.Label(r1, text='PQI等级', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left', padx=(10,3))
+        self.filter_grade_var = tk.StringVar(value='全部')
+        ttk.Combobox(r1, textvariable=self.filter_grade_var, width=6, state='readonly',
+                     values=['全部','优','良','中','次','差']).pack(side='left')
+        tk.Label(r1, text='类型', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left', padx=(10,3))
+        self.filter_type_var = tk.StringVar(value='全部')
+        ttk.Combobox(r1, textvariable=self.filter_type_var, width=10, state='readonly',
+                     values=['全部','沥青路面','水泥路面']).pack(side='left')
+        r2 = self._row(card2, 6)
+        tk.Button(r2, text='🔍 筛选', command=self._apply_filter,
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9), padx=12, cursor='hand2').pack(side='left', padx=3)
+        tk.Button(r2, text='↺ 重置', command=self._reset_filter, font=('Microsoft YaHei', 9)).pack(side='left', padx=3)
+        tk.Button(r2, text='📥 导出Excel', command=self._export_filtered, font=('Microsoft YaHei', 9)).pack(side='right', padx=3)
+        self.filter_stats = tk.Label(r2, text='', bg=THEME['card'], fg=THEME['text_light'], font=('Microsoft YaHei', 9))
+        self.filter_stats.pack(side='left', padx=15)
+
+        # 数据表格
+        cols = ('路线编码','路段起点','路段终点','路段长度km','路面类型','PQI','PCI','RQI','PQI分级','年份','县份')
+        tvf = tk.Frame(sf, bg=THEME['bg']); tvf.pack(fill='both', expand=True, padx=20, pady=5)
+        self.data_tree = ttk.Treeview(tvf, columns=cols, show='headings', height=14)
+        ws = {'路线编码':80,'路段起点':65,'路段终点':65,'路段长度km':65,'路面类型':75,'PQI':50,'PCI':50,'RQI':50,'PQI分级':50,'年份':40,'县份':50}
+        for c in cols:
+            self.data_tree.heading(c, text=c); self.data_tree.column(c, width=ws.get(c,55), anchor='center')
+        sv = ttk.Scrollbar(tvf, orient='vertical', command=self.data_tree.yview)
+        sh = ttk.Scrollbar(tvf, orient='horizontal', command=self.data_tree.xview)
+        self.data_tree.configure(yscrollcommand=sv.set, xscrollcommand=sh.set)
+        self.data_tree.pack(side='left', fill='both', expand=True)
+        sv.pack(side='right', fill='y'); sh.pack(side='bottom', fill='x')
+
         self._auto_load_config()
-
-        # 加载按钮
-        btn_row = ttk.Frame(frame)
-        btn_row.pack(fill='x', pady=15)
-        
-        ttk.Button(btn_row, text='加载数据', command=self._load_data,
-                   style='Primary.TButton').pack(side='left')
-        
-        self.load_info_label = ttk.Label(frame, text='', foreground=THEME['text_light'])
-        self.load_info_label.pack(anchor='w')
 
     def _auto_load_config(self):
         cfg = self.config.get('data_files', {})
-        for year, path in cfg.items():
-            if year.isdigit() and int(year) in self.file_vars:
-                self.file_vars[int(year)].set(path)
+        for y, p in cfg.items():
+            if y.isdigit() and int(y) in self.file_vars: self.file_vars[int(y)].set(p)
 
     def _browse_file(self, year):
-        path = filedialog.askopenfilename(
-            title=f'选择{year}年数据文件',
-            filetypes=[('Excel文件', '*.xlsx *.xls'), ('所有文件', '*.*')]
-        )
-        if path:
-            self.file_vars[year].set(path)
+        path = filedialog.askopenfilename(title=f'选择{year}年数据', filetypes=[('Excel','*.xlsx *.xls')])
+        if path: self.file_vars[year].set(path)
 
-    def _browse_files_multi(self):
-        """批量浏览选择多个Excel文件，按文件名排序后自动匹配年份填入"""
+    def _browse_folder(self):
+        """批量识别：选择文件夹或文件，自动匹配年份"""
         import re
-        paths = filedialog.askopenfilenames(
-            title='选择数据文件（可多选）',
-            filetypes=[('Excel文件', '*.xlsx *.xls'), ('所有文件', '*.*')]
-        )
-        if not paths:
+        path = filedialog.askdirectory(title='选择包含Excel文件的文件夹', mustexist=True)
+        if not path:
+            paths = filedialog.askopenfilenames(title='选择多个Excel文件', filetypes=[('Excel','*.xlsx *.xls')])
+            if not paths: return
+            matched = 0
+            for p in sorted(paths):
+                fn = os.path.basename(p)
+                ym = re.search(r'(20\d{2})', fn)
+                year = int(ym.group(1)) if ym and int(ym.group(1)) in self.file_vars else None
+                if year and not self.file_vars[year].get():
+                    self.file_vars[year].set(p); matched += 1
+                elif year:
+                    # Already set, try next best match
+                    for y in range(2021,2026):
+                        if not self.file_vars[y].get():
+                            self.file_vars[y].set(p)
+                            matched += 1; break
+            messagebox.showinfo('批量识别', f'已完成：匹配{matched}个文件')
             return
-        
-        # 按文件名排序
-        sorted_paths = sorted(paths, key=lambda p: os.path.basename(p))
-        
-        # 尝试从文件名中提取年份并匹配
+        # Scan folder
         matched = 0
-        unmatched = []
-        for path in sorted_paths:
-            filename = os.path.basename(path)
-            # 提取文件名中的4位数字年份
-            year_match = re.search(r'(20\d{2})', filename)
-            if year_match:
-                year = int(year_match.group(1))
-                if year in self.file_vars:
-                    self.file_vars[year].set(path)
-                    matched += 1
-                    continue
-            unmatched.append(filename)
-        
-        if unmatched:
-            tips = '\n'.join(f'  - {f}' for f in unmatched)
-            messagebox.showinfo('批量浏览结果',
-                f'已匹配 {matched} 个文件到对应年份。\n\n以下文件未能自动匹配年份，请手动设置：\n{tips}')
-        else:
-            messagebox.showinfo('批量浏览结果', f'已成功匹配 {matched} 个文件到对应年份。')
+        for root, dirs, files in os.walk(path):
+            for fn in sorted(files):
+                if not fn.endswith(('.xlsx','.xls')): continue
+                fm = os.path.join(root, fn)
+                ym = re.search(r'(20\d{2})', fn)
+                year = int(ym.group(1)) if ym and int(ym.group(1)) in self.file_vars else None
+                if year and not self.file_vars[year].get():
+                    self.file_vars[year].set(fm); matched += 1
+                elif year:
+                    for y in range(2021,2026):
+                        if not self.file_vars[y].get():
+                            self.file_vars[y].set(fm)
+                            matched += 1; break
+        messagebox.showinfo('批量识别', f'文件夹扫描完成：匹配{matched}个文件')
+        self.load_info.config(text=f'已识别{matched}个文件，可点击"加载数据"', fg=THEME['success'])
 
     def _load_data(self):
-        self.progressbar.start(10)
-        self.status_var.set('正在加载数据...')
-        self.update()
-
         file_map = {}
-        for year, var in self.file_vars.items():
-            path = var.get().strip()
-            if path and os.path.exists(path):
-                file_map[year] = path
-
+        for y, v in self.file_vars.items():
+            p = v.get().strip()
+            if p and os.path.exists(p): file_map[y] = p
         if not file_map:
-            messagebox.showwarning('提示', '请至少配置一个数据文件')
-            self.progressbar.stop()
-            self.status_var.set('就绪')
-            return
-
+            messagebox.showwarning('提示','请至少配置一个数据文件'); return
+        self.status_var.set('正在加载数据...'); self.update()
         try:
             data = load_all_data(file_map)
             self.data_cache = data
-            
-            total = sum(len(df) for df in data.values())
-            counties = sorted(set.union(*[set(df.get('县份', [])) for df in data.values() if '县份' in df.columns]))
-            years = sorted(set.union(*[set(df.get('年份', [])) for df in data.values() if '年份' in df.columns]))
-            
-            info = f'加载成功：{total}条路段，{len(counties)}个县份（{", ".join(counties)}），年份{min(years)}-{max(years)}'
-            self.load_info_label.config(text=info, foreground=THEME['success'])
-            
-            self._update_filter_options(counties, years)
-            
+            all_df = data.get('全部', pd.DataFrame())
+            counties = sorted(all_df['县份'].unique().tolist()) if '县份' in all_df.columns else []
+            years = sorted(all_df['年份'].unique().tolist()) if '年份' in all_df.columns else []
+            self.load_info.config(text=f'✓ 成功加载 {len(all_df)} 条记录 | {len(counties)} 个县份 | {min(years)}-{max(years)} 年', fg=THEME['success'])
+            cv = ['全部']+sorted(counties); yv = ['全部']+[str(y) for y in sorted(years)]
+            self.filter_county_cb['values'] = cv; self.filter_year_cb['values'] = yv
+            # 更新所有页面的县份下拉
+            for a in ['tech_county_cb','model_county_cb','demand_county_cb','budget_county_cb','map_county_cb']:
+                if hasattr(self, a): getattr(self, a)['values'] = cv
+            if counties:
+                self.filter_county_var.set(counties[0])
+                for a in ['tech_county_var','demand_county_var']:
+                    if hasattr(self, a): getattr(self, a).set('全部')
+            if years: self.filter_year_var.set(str(max(years)))
+            self.status_var.set(f'数据加载完成 — {len(all_df)}条记录')
+            self.mark_step_done(1)
         except Exception as e:
-            messagebox.showerror('错误', f'加载失败：{str(e)}')
-            self.load_info_label.config(text=f'加载失败：{str(e)}', foreground=THEME['danger'])
-
-        self.progressbar.stop()
-        self.status_var.set('就绪')
-
-    def _update_filter_options(self, counties, years):
-        county_values = ['全部'] + sorted(counties)
-        year_values = ['全部'] + [str(y) for y in sorted(years)]
-
-        self.filter_county_cb['values'] = county_values
-        self.filter_year_cb['values'] = year_values
-        self.analysis_county_cb['values'] = county_values
-        self.report_county_cb['values'] = county_values + ['全部'] if '全部' not in county_values else county_values
-        
-        # 刷新数据分析Tab的县份下拉
-        if hasattr(self, 'model_county_cb'):
-            self.model_county_cb['values'] = county_values
-
-        if counties:
-            self.filter_county_var.set(counties[0])
-            self.analysis_county_var.set(counties[0])
-            if hasattr(self, 'report_county_var'):
-                self.report_county_var.set(counties[0])
-        if years:
-            self.filter_year_var.set(str(int(max(years))))
-
-    # ════════════════════════════════════════
-    # Tab 2: 数据筛选
-    # ════════════════════════════════════════
-    def _build_filter_tab(self, parent):
-        frame = ttk.Frame(parent)
-        frame.pack(fill='both', expand=True, padx=20, pady=20)
-        
-        ttk.Label(frame, text='数据筛选与预览', style='Title.TLabel').pack(anchor='w')
-        ttk.Label(frame, text='加载数据后，在此筛选查看具体路段数据', style='Subtitle.TLabel').pack(anchor='w', pady=(0, 10))
-        
-        # 筛选条件行
-        filter_card = ttk.LabelFrame(frame, text='筛选条件', padding=10)
-        filter_card.pack(fill='x', pady=5)
-        
-        row1 = ttk.Frame(filter_card)
-        row1.pack(fill='x', pady=3)
-        
-        ttk.Label(row1, text='县份：').pack(side='left')
-        self.filter_county_var = tk.StringVar(value='全部')
-        self.filter_county_cb = ttk.Combobox(row1, textvariable=self.filter_county_var, width=10, state='readonly')
-        self.filter_county_cb['values'] = ['全部']   # 加载数据后自动更新
-        self.filter_county_cb.pack(side='left', padx=(0, 15))
-        
-        ttk.Label(row1, text='年份：').pack(side='left')
-        self.filter_year_var = tk.StringVar(value='全部')
-        self.filter_year_cb = ttk.Combobox(row1, textvariable=self.filter_year_var, width=10, state='readonly')
-        self.filter_year_cb['values'] = ['全部']   # 加载数据后自动更新
-        self.filter_year_cb.pack(side='left', padx=(0, 15))
-        
-        ttk.Label(row1, text='PQI等级：').pack(side='left')
-        self.filter_grade_var = tk.StringVar(value='全部')
-        ttk.Combobox(row1, textvariable=self.filter_grade_var, width=8, state='readonly',
-                     values=['全部', '优', '良', '中', '次', '差']).pack(side='left', padx=(0, 15))
-        
-        ttk.Label(row1, text='路面类型：').pack(side='left')
-        self.filter_type_var = tk.StringVar(value='全部')
-        self.filter_type_cb = ttk.Combobox(row1, textvariable=self.filter_type_var, width=12, state='readonly')
-        self.filter_type_cb['values'] = ['全部', '沥青路面', '水泥路面']
-        self.filter_type_cb.pack(side='left')
-        
-        row2 = ttk.Frame(filter_card)
-        row2.pack(fill='x', pady=3)
-        ttk.Label(row2, text='PQI范围：').pack(side='left')
-        self.filter_pqi_min = tk.StringVar(value='0')
-        self.filter_pqi_max = tk.StringVar(value='100')
-        ttk.Entry(row2, textvariable=self.filter_pqi_min, width=6).pack(side='left')
-        ttk.Label(row2, text=' ~ ').pack(side='left')
-        ttk.Entry(row2, textvariable=self.filter_pqi_max, width=6).pack(side='left', padx=(0, 15))
-        
-        ttk.Button(row2, text='应用筛选', command=self._apply_filter,
-                   style='Primary.TButton').pack(side='left', padx=5)
-        ttk.Button(row2, text='↺ 重置', command=self._reset_filter).pack(side='left')
-        tk.Button(row2, text='📥 导出筛选结果', command=self._export_filtered).pack(side='right')
-        
-        # 统计信息行
-        self.filter_stats_label = ttk.Label(frame, text='请先加载数据', foreground=THEME['text_light'])
-        self.filter_stats_label.pack(anchor='w', pady=5)
-        
-        # 数据表格
-        table_frame = ttk.Frame(frame)
-        table_frame.pack(fill='both', expand=True)
-        
-        columns = ('路线编码', '方向', '路段起点', '路段终点', '路段长度km', '路面宽度', '技术等级', '路面类型', 'PQI', 'PCI', 'RQI', 'PQI分级', '年份')
-        self.data_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=18)
-        
-        col_widths = {'路线编码': 80, '方向': 45, '路段起点': 80, '路段终点': 80, '路段长度km': 80,
-                      '路面宽度': 70, '技术等级': 80, '路面类型': 90, 'PQI': 60, 'PCI': 60, 'RQI': 60, 'PQI分级': 60, '年份': 50}
-        for col in columns:
-            self.data_tree.heading(col, text=col, command=lambda c=col: self._sort_tree(c))
-            self.data_tree.column(col, width=col_widths.get(col, 80), anchor='center')
-        
-        vsb = ttk.Scrollbar(table_frame, orient='vertical', command=self.data_tree.yview)
-        hsb = ttk.Scrollbar(table_frame, orient='horizontal', command=self.data_tree.xview)
-        self.data_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        
-        self.data_tree.pack(side='left', fill='both', expand=True)
-        vsb.pack(side='right', fill='y')
-        hsb.pack(side='bottom', fill='x')
-        
-        self._tree_sort_col = None
-        self._tree_sort_rev = False
+            messagebox.showerror('错误', str(e))
 
     def _apply_filter(self):
-        if not self.data_cache:
-            messagebox.showwarning('提示', '请先加载数据')
-            return
-
-        all_df = self.data_cache.get('全部', pd.DataFrame())
-        if all_df.empty:
-            all_df = pd.concat(self.data_cache.values(), ignore_index=True)
-
-        df = all_df.copy()
-
-        county = self.filter_county_var.get()
-        if county != '全部' and '县份' in df.columns:
-            df = df[df['县份'] == county]
-
-        year = self.filter_year_var.get()
-        if year != '全部' and '年份' in df.columns:
-            df = df[df['年份'] == int(year)]
-
-        grade = self.filter_grade_var.get()
-        if grade != '全部' and 'PQI分级' in df.columns:
-            df = df[df['PQI分级'] == grade]
-
-        ptype = self.filter_type_var.get()
-        if ptype != '全部' and '路面类型' in df.columns:
-            df = df[df['路面类型'] == ptype]
-
-        pqi_min = float(self.filter_pqi_min.get() or 0)
-        pqi_max = float(self.filter_pqi_max.get() or 100)
-        if 'PQI' in df.columns:
-            df = df[(df['PQI'] >= pqi_min) & (df['PQI'] <= pqi_max)]
-
+        if not self.data_cache: return
+        df = pd.concat(self.data_cache.values(), ignore_index=True)
+        c = self.filter_county_var.get()
+        if c != '全部' and '县份' in df.columns: df = df[df['县份'] == c]
+        y = self.filter_year_var.get()
+        if y != '全部' and '年份' in df.columns: df = df[df['年份'] == int(y)]
+        g = self.filter_grade_var.get()
+        if g != '全部' and 'PQI分级' in df.columns: df = df[df['PQI分级'] == g]
+        p = self.filter_type_var.get()
+        if p != '全部' and '路面类型' in df.columns: df = df[df['路面类型'] == p]
         self.filtered_df = df
-
-        total_km = df['路段长度km'].sum() if '路段长度km' in df.columns else 0
-        avg_pqi = df['PQI'].mean() if 'PQI' in df.columns else 0
-        self.filter_stats_label.config(
-            text=f'筛选结果：{len(df)}条路段，{total_km:.1f}km，平均PQI {avg_pqi:.1f}',
-            foreground=THEME['text']
-        )
-
-        self._refresh_tree(df)
+        km = df['路段长度km'].sum() if '路段长度km' in df.columns else 0
+        self.filter_stats.config(text=f'{len(df)}条 | {km:.1f}km')
+        self.data_tree.delete(*self.data_tree.get_children())
+        for _, row in df.head(500).iterrows():
+            vals = [f'{row.get(c,""):.2f}' if isinstance(row.get(c,''),float) else str(row.get(c,''))
+                    for c in self.data_tree['columns']]
+            self.data_tree.insert('','end',values=vals)
 
     def _reset_filter(self):
-        self.filter_county_var.set('全部')
-        self.filter_year_var.set('全部')
-        self.filter_grade_var.set('全部')
-        self.filter_type_var.set('全部')
-        self.filter_pqi_min.set('0')
-        self.filter_pqi_max.set('100')
+        for v in [self.filter_county_var, self.filter_year_var, self.filter_grade_var, self.filter_type_var]:
+            v.set('全部')
         self._apply_filter()
-
-    def _refresh_tree(self, df):
-        self.data_tree.delete(*self.data_tree.get_children())
-        
-        for _, row in df.head(500).iterrows():
-            vals = []
-            for col in ('路线编码', '方向', '路段起点', '路段终点', '路段长度km', '路面宽度',
-                       '技术等级', '路面类型', 'PQI', 'PCI', 'RQI', 'PQI分级', '年份'):
-                val = row.get(col, '')
-                vals.append(f'{val:.2f}' if isinstance(val, float) else val)
-            self.data_tree.insert('', 'end', values=vals)
-
-    def _sort_tree(self, col):
-        if not self.filtered_df is None:
-            reverse = self._tree_sort_rev if self._tree_sort_col == col else False
-            self._tree_sort_rev = not reverse
-            self._tree_sort_col = col
-            
-            sorted_df = self.filtered_df.sort_values(by=col, ascending=not reverse)
-            self._refresh_tree(sorted_df)
 
     def _export_filtered(self):
         if self.filtered_df is None or self.filtered_df.empty:
-            messagebox.showwarning('提示', '没有可导出的数据')
-            return
+            messagebox.showwarning('提示','没有可导出数据'); return
+        path = filedialog.asksaveasfilename(title='导出', defaultextension='.xlsx', filetypes=[('Excel','*.xlsx')])
+        if path: self.filtered_df.to_excel(path, index=False); messagebox.showinfo('成功','已导出')
 
-        path = filedialog.asksaveasfilename(
-            title='导出筛选结果',
-            defaultextension='.xlsx',
-            filetypes=[('Excel文件', '*.xlsx')],
-            initialfile='筛选结果.xlsx'
-        )
-        if path:
-            try:
-                self.filtered_df.to_excel(path, index=False)
-                messagebox.showinfo('成功', f'已导出到：{path}')
-            except Exception as e:
-                messagebox.showerror('错误', f'导出失败：{str(e)}')
+    # ══════════════════════════════════════════════════════════════════════════
+    #  页面2: 现状评定（4张评价表 + 图表）
+    # ══════════════════════════════════════════════════════════════════════════
+    def _build_page2(self, parent):
+        # 顶部分析参数栏
+        top = tk.Frame(parent, bg=THEME['bg'])
+        top.pack(fill='x', padx=15, pady=(10,5))
+        tk.Label(top, text='📊 现状数据评定分析', bg=THEME['bg'], fg=THEME['text'],
+                font=('Microsoft YaHei', 14, 'bold')).pack(anchor='w')
+        r = tk.Frame(top, bg=THEME['bg']); r.pack(fill='x', pady=5)
+        tk.Label(r, text='县份', bg=THEME['bg'], font=('Microsoft YaHei', 9)).pack(side='left')
+        self.tech_county_var = tk.StringVar(value='全部')
+        self.tech_county_cb = ttk.Combobox(r, textvariable=self.tech_county_var, width=10, state='readonly', values=['全部'])
+        self.tech_county_cb.pack(side='left', padx=5)
+        tk.Label(r, text='基准年', bg=THEME['bg'], font=('Microsoft YaHei', 9)).pack(side='left', padx=(15,0))
+        self.tech_year_var = tk.StringVar(value='2025')
+        ttk.Combobox(r, textvariable=self.tech_year_var, width=6, values=['2021','2022','2023','2024','2025']).pack(side='left', padx=5)
+        tk.Button(r, text='▶ 执行分析', command=self._run_tech,
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 10, 'bold'), padx=15, cursor='hand2').pack(side='left', padx=15)
+        tk.Button(r, text='📥 导出全部', command=self._export_tech_all, font=('Microsoft YaHei', 9)).pack(side='right', padx=5)
 
-    # ════════════════════════════════════════
-    # Tab 2.5: 数据分析（衰减模型介绍 + 养护计划）
-    # ════════════════════════════════════════
-    def _build_model_info_tab(self, parent):
-        frame = ttk.Frame(parent)
-        frame.pack(fill='both', expand=True, padx=20, pady=20)
+        # 可拖拽调整的4栏区域
+        self.tech_pw = tk.PanedWindow(parent, orient='vertical', bg=THEME['card_border'],
+                                       sashwidth=4, sashrelief='raised')
+        self.tech_pw.pack(fill='both', expand=True, padx=15, pady=(5,10))
 
-        ttk.Label(frame, text='数据分析与养护计划', style='Title.TLabel').pack(anchor='w')
-        ttk.Label(frame, text='基于用户加载数据动态计算，按县份分别分析', 
-                  style='Subtitle.TLabel').pack(anchor='w', pady=(0, 15))
+        self.tech_sections = {}
+        for key, title in [('road_type','表1. 等级评价 — 按国道/省道 × 指标'),('route','表2. 路线评价 — 按路线编号'),
+                           ('tech_grade','表3. 技术等级评价 — 按公路等级 × 指标'),('year','表4. 年度趋势 — 按年份')]:
+            sec = ttk.LabelFrame(self.tech_pw, text=title, padding=5)
+            self.tech_pw.add(sec, height=200)
+            self.tech_sections[key] = sec
 
-        # ── 县份选择 ──
-        county_frame = ttk.Frame(frame)
-        county_frame.pack(fill='x', pady=(0, 10))
-        ttk.Label(county_frame, text='选择县份：').pack(side='left')
-        self.model_county_var = tk.StringVar(value='全部')
-        self.model_county_cb = ttk.Combobox(county_frame, textvariable=self.model_county_var,
-                                              width=12, state='readonly')
-        self.model_county_cb['values'] = ['全部']
-        self.model_county_cb.pack(side='left', padx=10)
-        ttk.Button(county_frame, text='刷新县份', command=self._refresh_model_counties,
-                   style='Secondary.TButton').pack(side='left', padx=5)
-
-        # ── 标签页：衰减率 | 5年预测 | 养护里程 | 养护资金 | 年度汇总 ──
-        self.model_notebook = ttk.Notebook(frame)
-        self.model_notebook.pack(fill='both', expand=True, pady=10)
-        
-        # Tab 1: 衰减率标定
-        self._build_decay_rate_tab()
-        
-        # Tab 2: 5年PQI预测
-        self._build_prediction_tab()
-        
-        # Tab 3: PQI-Proj. IMP（手动养护规划）
-        self._build_pqi_proj_tab()
-        
-        # Tab 4: 养护里程
-        self._build_mileage_tab()
-        
-        # Tab 5: 养护资金
-        self._build_fund_tab()
-        
-        # Tab 6: 年度汇总
-        self._build_yearly_summary_tab()
-
-    def _refresh_model_counties(self):
-        """刷新县份下拉列表"""
+        # 预加载数据
         if self.data_cache:
-            all_df = pd.concat(self.data_cache.values(), ignore_index=True)
-            if '县份' in all_df.columns:
-                counties = ['全部'] + sorted(all_df['县份'].unique().tolist())
-                self.model_county_cb['values'] = counties
-                self.model_county_var.set('全部')
+            self._run_tech()
 
-    def _get_current_county(self):
-        """获取当前选择的县份"""
-        county = self.model_county_var.get()
-        if county == '全部':
-            return None
-        return county
+    def _run_tech(self):
+        df = self._get_data(self.tech_county_var.get())
+        if df.empty: return
+        year = int(self.tech_year_var.get())
+        if '年份' in df.columns: df = df[df['年份'] == year]
+        if '路段长度km' not in df.columns: df['路段长度km'] = 1.0
+        def rt(r): return '国道' if str(r)[:1]=='G' else ('省道' if str(r)[:1]=='S' else '其他')
+        if '路线编码' in df.columns: df['道路类型'] = df['路线编码'].apply(rt)
+        pk = {'国': '国道', '省': '省道'}
 
-    # ── Tab 1: 衰减率标定 ──
-    def _build_decay_rate_tab(self):
-        self.decay_frame = ttk.Frame(self.model_notebook)
-        self.model_notebook.add(self.decay_frame, text=' 衰减率标定 ')
-        
-        # 介绍卡片
-        intro_card = ttk.LabelFrame(self.decay_frame, text='模型介绍', padding=10)
-        intro_card.pack(fill='x', pady=(0, 10))
-        
-        intro_text = """【指数衰减模型】PQI(t) = PQI₀ × exp(-k × t)
+        # ── 表1: 等级评价 ──
+        self._clear_section('road_type')
+        cols = ('道路类型','指标','均值','优良路率','次差路率','优里程','良里程','中里程','次里程','差里程','评定里程')
+        tf1, tv1 = self._build_section_table(self.tech_sections['road_type'], cols, 5, ws={'道路类型':65,'指标':50,'均值':55,'优良路率':70,'次差路率':70,'优里程':55,'良里程':55,'中里程':55,'次里程':55,'差里程':55,'评定里程':70})
+        for road in ['国道','省道']:
+            rd = df[df['道路类型']==road]
+            for idx, label in [('PQI','PQI'),('PCI','PCI'),('RQI','RQI')]:
+                if idx not in rd.columns: continue
+                t = rd['路段长度km'].sum()
+                avg = rd[idx].mean() if not rd[idx].isna().all() else 0
+                gr = rd[rd[idx]>=80]['路段长度km'].sum()/t*100 if t>0 else 0
+                br = rd[rd[idx]<70]['路段长度km'].sum()/t*100 if t>0 else 0
+                yl=rd[(rd[idx]>=90)&(rd[idx]<=100)]['路段长度km'].sum()
+                lh=rd[(rd[idx]>=80)&(rd[idx]<90)]['路段长度km'].sum()
+                z=rd[(rd[idx]>=70)&(rd[idx]<80)]['路段长度km'].sum()
+                ci=rd[(rd[idx]>=60)&(rd[idx]<70)]['路段长度km'].sum()
+                ch=rd[rd[idx]<60]['路段长度km'].sum()
+                tv1.insert('','end',values=(road,label,f'{avg:.1f}',f'{gr:.1f}%',f'{br:.1f}%',f'{yl:.1f}',f'{lh:.1f}',f'{z:.1f}',f'{ci:.1f}',f'{ch:.1f}',f'{t:.1f}'))
+        self._build_section_chart(self.tech_sections['road_type'], tv1, 'group_bar', title='国道/省道 × PQI/PCI/RQI 对比')
 
-【标定方法】同一路段需有多于一年的数据，路段按路线编码+起点+终点匹配；剔除养护干预点（相邻两年上升>2分）；线性化拟合后取中位数"""
-        ttk.Label(intro_card, text=intro_text, justify='left', font=('Microsoft YaHei', 9),
-                  foreground=THEME['text']).pack(anchor='w')
-        
-        # 计算按钮 + 导出按钮
-        btn_frame = ttk.Frame(self.decay_frame)
-        btn_frame.pack(fill='x', pady=(0, 10))
-        ttk.Button(btn_frame, text='计算衰减率', command=self._calculate_decay_rates,
-                   style='Primary.TButton').pack(side='left')
-        self.calc_status_label = ttk.Label(btn_frame, text='请先加载数据', 
-                                            foreground=THEME['text_light'], font=('Microsoft YaHei', 9))
-        self.calc_status_label.pack(side='left', padx=15)
-        
-        # 导出和复制按钮
-        tk.Button(btn_frame, text='📥 导出Excel', command=self._export_decay_excel).pack(side='left', padx=5)
-        tk.Button(btn_frame, text='📋 复制', command=self._copy_decay_to_clipboard).pack(side='left')
-        
+        # ── 表2: 路线评价 ──
+        self._clear_section('route')
+        cols2 = ('路线编码','PQI均值','PQI优良路率','PCI均值','PCI优良路率','RQI均值','RQI优良路率')
+        tf2, tv2 = self._build_section_table(self.tech_sections['route'], cols2, 8, ws={'路线编码':90,'PQI均值':75,'PQI优良路率':90,'PCI均值':75,'PCI优良路率':90,'RQI均值':75,'RQI优良路率':90})
+        for rt_code, rd in df.groupby('路线编码'):
+            t = rd['路段长度km'].sum()
+            vals = []
+            for idx in ['PQI','PCI','RQI']:
+                if idx in rd.columns:
+                    avg = rd[idx].mean() if not rd[idx].isna().all() else 0
+                    gr = rd[rd[idx]>=80]['路段长度km'].sum()/t*100 if t>0 else 0
+                    vals += [f'{avg:.1f}', f'{gr:.1f}%']
+                else:
+                    vals += ['-','-']
+            tv2.insert('','end',values=(rt_code, *vals))
+        tv2.insert('','end',values=('全路网',*[v for _ in ['PQI','PCI','RQI'] for v in [f"{df['PQI'].mean():.1f}" if 'PQI' in df.columns else '-',f"{df[df['PQI']>=80]['路段长度km'].sum()/df['路段长度km'].sum()*100:.1f}%" if 'PQI' in df.columns else '-']]))
+        self._build_section_chart(self.tech_sections['route'], tv2, 'line', title='各路线PQI/PCI/RQI对比')
+
+        # ── 表3: 技术等级 ──
+        self._clear_section('tech_grade')
+        cols3 = ('技术等级','PQI均值','PQI优良路率','PCI均值','PCI优良路率','RQI均值','RQI优良路率')
+        tf3, tv3 = self._build_section_table(self.tech_sections['tech_grade'], cols3, 5, ws={'技术等级':85,'PQI均值':80,'PQI优良路率':80,'PCI均值':80,'PCI优良路率':80,'RQI均值':80,'RQI优良路率':80})
+        grade_map = {'一':'一级公路','二':'二级公路','三':'三级公路','四':'四级公路'}
+        for key, grade in grade_map.items():
+            rd = df[df['技术等级'].str.contains(key, na=False)] if '技术等级' in df.columns else pd.DataFrame()
+            if rd.empty and '技术等级' in df.columns: rd = df[df['技术等级']==grade]
+            if rd.empty: continue
+            t = rd['路段长度km'].sum()
+            if t == 0: t = 1
+            vals = []
+            for idx in ['PQI','PCI','RQI']:
+                avg = rd[idx].mean() if idx in rd.columns and not rd[idx].isna().all() else 0
+                gr = rd[rd[idx]>=80]['路段长度km'].sum()/t*100 if t>0 else 0
+                vals += [f'{avg:.1f}',f'{gr:.1f}%']
+            tv3.insert('','end',values=(grade, *vals))
+        if not tv3.get_children():
+            t = df['路段长度km'].sum(); t = t if t>0 else 1
+            for idx in ['PQI','PCI','RQI']:
+                avg = df[idx].mean() if idx in df.columns and not df[idx].isna().all() else 0
+                gr = df[df[idx]>=80]['路段长度km'].sum()/t*100 if t>0 else 0
+                tv3.insert('','end',values=('全路网', f'{avg:.1f}',f'{gr:.1f}%', '-','-', '-','-'))
+        self._build_section_chart(self.tech_sections['tech_grade'], tv3, 'combo', title='技术等级对比')
+
+        # ── 表4: 年度趋势 ──
+        self._clear_section('year')
+        cols4 = ('年份','PQI均值','PCI均值','RQI均值','PQI优良路率')
+        tf4, tv4 = self._build_section_table(self.tech_sections['year'], cols4, 6, ws={'年份':55,'PQI均值':78,'PCI均值':78,'RQI均值':78,'PQI优良路率':88})
+        all_df = pd.concat(self.data_cache.values(), ignore_index=True) if self.data_cache else df
+        if '路段长度km' not in all_df.columns: all_df['路段长度km'] = 1.0
+        years_data = sorted(all_df['年份'].unique()) if '年份' in all_df.columns else [year]
+        if not years_data: years_data = [year]
+        for y in years_data:
+            yi = int(y) if str(y).isdigit() else y
+            yd = all_df[all_df['年份']==y] if '年份' in all_df.columns else df
+            if yd.empty: continue
+            t = yd['路段长度km'].sum()
+            if t == 0: t = 1
+            pqim = yd['PQI'].mean() if 'PQI' in yd.columns else 0
+            pcim = yd['PCI'].mean() if 'PCI' in yd.columns else 0
+            rqim = yd['RQI'].mean() if 'RQI' in yd.columns else 0
+            gr = yd[yd['PQI']>=80]['路段长度km'].sum()/t*100 if 'PQI' in yd.columns and t>0 else 0
+            tv4.insert('','end',values=(yi, f'{pqim:.1f}', f'{pcim:.1f}', f'{rqim:.1f}', f'{gr:.1f}%'))
+        self._build_section_chart(self.tech_sections['year'], tv4, 'line', title='年度趋势')
+
+        self.mark_step_done(2)
+        self.status_var.set(f'现状评定完成 — {len(df)}条记录')
+
+    def _clear_section(self, key):
+        """彻底清除section内的所有子控件"""
+        sec = self.tech_sections[key]
+        for w in list(sec.winfo_children()):
+            w.destroy()
+        sec.update_idletasks()
+
+    def _build_section_table(self, parent, cols, height, ws=None):
+        """在parent左侧创建表格(自适应高度)"""
+        tvf = tk.Frame(parent, bg=THEME['card'])
+        tvf.pack(side='left', fill='both', expand=True, padx=(0,2))
+        tv = ttk.Treeview(tvf, columns=cols, show='headings', height=height)
+        for c in cols:
+            tv.heading(c, text=c)
+            tv.column(c, width=ws.get(c,60) if ws else 60, anchor='center')
+        rp = tk.Frame(tvf, bg=THEME['card'])
+        rp.pack(side='right', fill='y')
+        sv = ttk.Scrollbar(rp, orient='vertical', command=tv.yview)
+        sv.pack(side='top', fill='y', expand=True)
+        tk.Button(rp, text='📋', font=('Microsoft YaHei', 7),
+                 command=lambda t=tv: self._copy_tree(t), padx=3).pack(side='bottom', pady=(2,0))
+        tv.configure(yscrollcommand=sv.set)
+        tv.pack(side='left', fill='both', expand=True)
+        return tvf, tv
+
+    def _build_section_chart(self, parent, tv, chart_type, title='图表'):
+        """在parent右侧创建图表"""
+        try:
+            import matplotlib
+            matplotlib.use('TkAgg')
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            from matplotlib.figure import Figure
+            import matplotlib.pyplot as plt
+            plt.rcParams['font.sans-serif'] = ['Microsoft YaHei','SimHei']
+            plt.rcParams['axes.unicode_minus'] = False
+        except ImportError:
+            return
+
+        try:
+            self._do_chart(parent, tv, chart_type, title)
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            tk.Label(parent, text=f'图表错误: {e}', fg=THEME['danger'], bg=THEME['card'],
+                     font=('Microsoft YaHei', 8)).pack(side='right', padx=10)
+
+    def _do_chart(self, parent, tv, chart_type, title):
+        """实际绘制图表"""
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        import matplotlib.pyplot as plt
+        cf = tk.Frame(parent, bg=THEME['card'])
+        cf.pack(side='right', fill='both', expand=True, padx=(2,0))
+
+        headers = tv['columns']
+        rows = [tv.item(it,'values') for it in tv.get_children()]
+        if not rows: return
+
+        labels = [str(r[0]) for r in rows]
+        fig = Figure(figsize=(8, 5.5), dpi=80, facecolor=THEME['card'])
+        ax = fig.add_subplot(111)
+        ax.set_facecolor(THEME['card'])
+
+        if chart_type == 'group_bar' and len(rows) <= 12:
+            road_types = sorted(set(str(r[0]) for r in rows))
+            indicators = sorted(set(str(r[1]) for r in rows), key=lambda x: {'PQI':0,'PCI':1,'RQI':2}.get(x,9))
+            data = {}
+            for r in rows:
+                idx, rd, v = str(r[1]), str(r[0]), float(str(r[2]).replace('%','')) if r[2]!='-' else 0
+                if idx not in data: data[idx] = {}
+                data[idx][rd] = v
+            x = range(len(indicators))
+            nbars = len(road_types)
+            w = 0.6 / nbars if nbars > 1 else 0.4
+            colors_road = {'国道':'#2E75B6','省道':'#27AE60'}
+            for j, rd in enumerate(road_types):
+                vals = [data.get(idx, {}).get(rd, 0) for idx in indicators]
+                bars = ax.bar([i + (j - (nbars-1)/2) * w for i in x], vals, w, label=rd, color=colors_road.get(rd,'#888'), zorder=2)
+                for bar in bars:
+                    h = bar.get_height()
+                    if h > 0: ax.text(bar.get_x() + bar.get_width()/2, h + max(vals)*0.02, f'{h:.1f}', ha='center', va='bottom', fontsize=6)
+            ax.set_xticks(x); ax.set_xticklabels(indicators, fontsize=8)
+            ax.legend(loc='upper left', fontsize=7)
+
+        elif chart_type == 'combo' and len(rows) <= 12:
+            num_cols = [i for i,h in enumerate(headers) if any(k in h for k in ['均值'])]
+            pct_cols = [i for i,h in enumerate(headers) if any(k in h for k in ['路率'])]
+            mean_colors = {'PQI均值':'#2E75B6','PCI均值':'#27AE60','RQI均值':'#E67E22'}
+            pct_colors = {'PQI优良路率':'#C0392B','PCI优良路率':'#8E44AD','RQI优良路率':'#D35400'}
+            x = range(len(labels))
+            total_bars = len(num_cols)
+            wb = 0.6 / total_bars if total_bars else 0.3
+            for j, ci in enumerate(num_cols):
+                vals = [float(str(r[ci]).replace('%','')) if r[ci] != '-' else 0 for r in rows]
+                col = mean_colors.get(headers[ci], f'C{j}')
+                bars = ax.bar([i + (j - (total_bars-1)/2) * wb for i in x], vals, wb, label=headers[ci], color=col, zorder=2)
+                for bar in bars:
+                    h = bar.get_height()
+                    if h > 0: ax.text(bar.get_x() + bar.get_width()/2, h + max(vals)*0.02, f'{h:.1f}', ha='center', va='bottom', fontsize=5.5)
+            if pct_cols:
+                ax2 = ax.twinx(); ax2.set_facecolor(THEME['card'])
+                for j, ci in enumerate(pct_cols):
+                    pv = [float(str(r[ci]).replace('%','')) if r[ci]!='-' else 0 for r in rows]
+                    col = pct_colors.get(headers[ci], f'C{3+j}')
+                    ax2.plot(x, pv, 'o-', color=col, label=headers[ci], markersize=5, linewidth=1.5, zorder=5)
+                    for xi, yv in zip(x, pv):
+                        ax2.annotate(f'{yv:.1f}%', (xi, yv), textcoords='offset points', xytext=(0,8), ha='center', fontsize=6, color=col)
+                ax2.set_ylabel('优良路率 (%)', fontsize=7); ax2.tick_params(labelsize=6)
+                h1,l1 = ax.get_legend_handles_labels(); h2,l2 = ax2.get_legend_handles_labels()
+                ax.legend(h1+h2, l1+l2, loc='upper left', fontsize=6)
+            ax.set_xticks(x); ax.set_xticklabels(labels, fontsize=7, rotation=25)
+
+        elif chart_type == 'line':
+            # 检测X轴数据：可转数字用数值，否则按标签序号
+            numeric_x = True
+            try: _ = float(str(rows[0][0]))
+            except: numeric_x = False
+            if numeric_x:
+                xv = [float(str(r[0])) for r in rows]
+            else:
+                xv = list(range(len(rows)))
+            num_cols = [i for i,h in enumerate(headers) if any(k in h for k in ['均值','路率'])]
+            COLORS = ['#2E75B6','#E67E22','#27AE60','#C0392B','#8E44AD','#D35400']
+            STYLES = ['o-','s--','D:','^-.','v--','*:']
+            for j, ci in enumerate(num_cols):
+                yv = [float(str(r[ci]).replace('%','')) if r[ci]!='-' else 0 for r in rows]
+                ax.plot(xv, yv, STYLES[j%6], color=COLORS[j%6], label=headers[ci], markersize=4, linewidth=1.2, zorder=2)
+                for xi, yi in zip(xv, yv):
+                    ax.annotate(f'{yi:.1f}', (xi, yi), textcoords='offset points', xytext=(0,8), ha='center', fontsize=5.5, color=COLORS[j%6])
+            ax.legend(fontsize=6)
+            if numeric_x:
+                try: ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True))
+                except: pass
+            else:
+                ax.set_xticks(xv)
+                ax.set_xticklabels(labels, fontsize=6, rotation=45)
+
+        ax.set_title(title, fontsize=9, fontweight='bold')
+        ax.tick_params(labelsize=7)
+        ax.grid(axis='y', alpha=0.3, linestyle='--')
+        fig.tight_layout()
+
+        canvas = FigureCanvasTkAgg(fig, cf)
+        canvas.draw(); canvas.get_tk_widget().pack(fill='both', expand=True)
+        # 导出按钮
+        bf = tk.Frame(cf, bg=THEME['card']); bf.pack(fill='x')
+        tk.Button(bf, text='💾 导出图表', font=('Microsoft YaHei', 7),
+                 command=lambda f=fig: ExportHelper.export(f)).pack(side='left')
+
+    def _copy_tree(self, tv):
+        """复制Treeview内容到剪贴板"""
+        headers = '\t'.join(tv['columns'])
+        lines = [headers]
+        for it in tv.get_children():
+            row = '\t'.join(str(v) for v in tv.item(it, 'values'))
+            lines.append(row)
+        text = '\n'.join(lines)
+        self.clipboard_clear(); self.clipboard_append(text)
+        messagebox.showinfo('成功', '已复制到剪贴板')
+
+    def _export_tech_all(self):
+        path = filedialog.asksaveasfilename(title='导出评定结果', defaultextension='.xlsx', filetypes=[('Excel','*.xlsx')], initialfile='现状评定.xlsx')
+        if not path: return
+        with pd.ExcelWriter(path) as writer:
+            for key, sec in self.tech_sections.items():
+                for w in sec.winfo_children():
+                    if isinstance(w, tk.Frame):
+                        for tw in w.winfo_children():
+                            if isinstance(tw, ttk.Treeview) and tw.winfo_children():
+                                rows = [tw.item(it,'values') for it in tw.get_children()]
+                                if rows:
+                                    pd.DataFrame(rows, columns=tw['columns']).to_excel(writer, sheet_name=key[:30], index=False)
+                                break
+        messagebox.showinfo('成功','已导出全部评定结果')
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  页面3: 目标设定
+    # ══════════════════════════════════════════════════════════════════════════
+    def _build_page3(self, parent):
+        self._section_title(parent, '🎯 养护目标设定')
+        self._section_sub(parent, '技术指标(加权PQI+优良路率) + 经济指标(B/C+成本+ROI) — 短期/中期/长期')
+
+        self.target_vars = {}
+        horizons = [
+            ('short', '短期目标 (1年)', '近期达标线'),
+            ('mid',   '中期目标 (2-5年)', '中期规划目标'),
+            ('long',  '长期目标 (5-10年)', '远期愿景目标'),
+        ]
+        # 默认目标：技术+经济双维度
+        default_targets = {
+            'short': {'国道_PQI':90,'国道_优良路率':92,'国道_BCR':1.2,'国道_km成本':50,
+                      '省道_PQI':88,'省道_优良路率':88,'省道_BCR':1.1,'省道_km成本':55},
+            'mid':   {'国道_PQI':92,'国道_优良路率':95,'国道_BCR':1.5,'国道_km成本':45,
+                      '省道_PQI':90,'省道_优良路率':92,'省道_BCR':1.3,'省道_km成本':50},
+            'long':  {'国道_PQI':94,'国道_优良路率':98,'国道_BCR':2.0,'国道_km成本':40,
+                      '省道_PQI':93,'省道_优良路率':95,'省道_BCR':1.8,'省道_km成本':45},
+        }
+
+        for hkey, htitle, hdesc in horizons:
+            f = ttk.LabelFrame(parent, text=f'{htitle} — {hdesc}', padding=10)
+            f.pack(fill='x', padx=15, pady=5)
+            r = self._row(f)
+            # 国道
+            gd = ttk.LabelFrame(r, text='普通国道', padding=5)
+            gd.pack(side='left', fill='x', expand=True, padx=(0,10))
+            grd = tk.Frame(gd, bg=self._bg(gd)); grd.pack(fill='x')
+            tk.Label(grd, text='技术→', bg=self._bg(gd), fg=THEME['accent'],
+                    font=('Microsoft YaHei',8,'bold')).pack(side='left', padx=(0,5))
+            for label, suffix, dv in [('PQI','PQI',default_targets[hkey]['国道_PQI']),
+                                       ('优良路率%','优良路率',default_targets[hkey]['国道_优良路率'])]:
+                tk.Label(grd, text=f'{label} ', bg=self._bg(gd), font=('Microsoft YaHei',9)).pack(side='left')
+                v = tk.IntVar(value=dv); self.target_vars[f'{hkey}_国道_{suffix}'] = v
+                ttk.Entry(grd, textvariable=v, width=5, font=('Microsoft YaHei',9)).pack(side='left', padx=(0,8))
+            tk.Label(grd, text='经济→', bg=self._bg(gd), fg=THEME['success'],
+                    font=('Microsoft YaHei',8,'bold')).pack(side='left', padx=(5,5))
+            for label, suffix, dv in [('B/C','BCR',default_targets[hkey]['国道_BCR']),
+                                       ('成本万/km','km成本',default_targets[hkey]['国道_km成本'])]:
+                tk.Label(grd, text=f'{label} ', bg=self._bg(gd), font=('Microsoft YaHei',9)).pack(side='left')
+                v = tk.IntVar(value=int(dv*100)) if suffix=='BCR' else tk.IntVar(value=dv)
+                self.target_vars[f'{hkey}_国道_{suffix}'] = v
+                w = 4 if suffix=='BCR' else 5
+                ttk.Entry(grd, textvariable=v, width=w, font=('Microsoft YaHei',9)).pack(side='left', padx=(0,8))
+            # 省道
+            sd = ttk.LabelFrame(r, text='普通省道', padding=5)
+            sd.pack(side='left', fill='x', expand=True)
+            srd = tk.Frame(sd, bg=self._bg(sd)); srd.pack(fill='x')
+            tk.Label(srd, text='技术→', bg=self._bg(sd), fg=THEME['accent'],
+                    font=('Microsoft YaHei',8,'bold')).pack(side='left', padx=(0,5))
+            for label, suffix, dv in [('PQI','PQI',default_targets[hkey]['省道_PQI']),
+                                       ('优良路率%','优良路率',default_targets[hkey]['省道_优良路率'])]:
+                tk.Label(srd, text=f'{label} ', bg=self._bg(sd), font=('Microsoft YaHei',9)).pack(side='left')
+                v = tk.IntVar(value=dv); self.target_vars[f'{hkey}_省道_{suffix}'] = v
+                ttk.Entry(srd, textvariable=v, width=5, font=('Microsoft YaHei',9)).pack(side='left', padx=(0,8))
+            tk.Label(srd, text='经济→', bg=self._bg(sd), fg=THEME['success'],
+                    font=('Microsoft YaHei',8,'bold')).pack(side='left', padx=(5,5))
+            for label, suffix, dv in [('B/C','BCR',default_targets[hkey]['省道_BCR']),
+                                       ('成本万/km','km成本',default_targets[hkey]['省道_km成本'])]:
+                tk.Label(srd, text=f'{label} ', bg=self._bg(sd), font=('Microsoft YaHei',9)).pack(side='left')
+                v = tk.IntVar(value=int(dv*100)) if suffix=='BCR' else tk.IntVar(value=dv)
+                self.target_vars[f'{hkey}_省道_{suffix}'] = v
+                w = 4 if suffix=='BCR' else 5
+                ttk.Entry(srd, textvariable=v, width=w, font=('Microsoft YaHei',9)).pack(side='left', padx=(0,8))
+
+        # 按钮 + 对比表
+        r = self._row(parent, 12)
+        tk.Button(r, text='💾 保存目标', command=self._save_targets,
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 10), padx=15, cursor='hand2').pack(side='left', padx=15)
+        tk.Button(r, text='🔄 对比现状', command=self._compare_targets,
+                 font=('Microsoft YaHei', 10), padx=10).pack(side='left', padx=5)
+
+        card2 = ttk.LabelFrame(parent, text='📊 目标 vs 现状对比', padding=10)
+        card2.pack(fill='both', expand=True, padx=15, pady=5)
+        cols = ('维度','道路','指标','当前值','短期目标','中期目标','长期目标')
+        self.target_tree = ttk.Treeview(card2, columns=cols, show='headings', height=10)
+        for i,c in enumerate(cols):
+            self.target_tree.heading(c, text=c)
+            self.target_tree.column(c, width=105, anchor='center')
+        self.target_tree.pack(fill='both', expand=True)
+
+    def _save_targets(self):
+        cfg = self.config
+        cfg['targets'] = {k:v.get() for k,v in self.target_vars.items()}
+        with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        self.mark_step_done(3)
+        self.status_var.set('短期/中期/长期养护目标已保存')
+        messagebox.showinfo('成功','养护目标已保存到配置文件')
+
+    def _compare_targets(self):
+        df = self._get_data('全部')
+        if df.empty: return
+        if '年份' in df.columns: df = df[df['年份']==df['年份'].max()]
+        def rt(r):
+            if pd.isna(r): return '其他'
+            s = str(r); return '国道' if s.startswith('G') else ('省道' if s.startswith('S') else '其他')
+        if '路线编码' in df.columns: df['道路类型'] = df['路线编码'].apply(rt)
+        if '路段长度km' not in df.columns: df['路段长度km'] = 1.0
+        self.target_tree.delete(*self.target_tree.get_children())
+
+        for road in ['国道','省道']:
+            rd = df[df['道路类型']==road]
+            if rd.empty: continue
+            t = rd['路段长度km'].sum()
+            # 技术指标
+            w_pqi = (rd['PQI'] * rd['路段长度km']).sum() / t if t>0 else 0
+            good_len = rd[rd['PQI']>=80]['路段长度km'].sum() if 'PQI' in rd.columns else 0
+            good_rate = good_len/t*100 if t>0 else 0
+            # 经济指标(估算)
+            width = rd['路面宽度'].mean() if '路面宽度' in rd.columns else 7
+            est_cost = t * 1000 * width * 300 / 10000  # 估算养护投资(万元)
+            from src.decision.cost_model import calc_bcr_ratio
+            bcr = calc_bcr_ratio(rd, est_cost) if est_cost>0 else 0
+            km_cost = est_cost / t if t>0 else 0
+
+            for metric, cur_val, suffix in [
+                ('加权PQI', w_pqi, 'PQI'), ('优良路率(%)', good_rate, '优良路率'),
+                ('B/C比', bcr, 'BCR'), ('每km成本(万)', km_cost, 'km成本')
+            ]:
+                short_t = self.target_vars.get(f'short_{road}_{suffix}', tk.IntVar(value=0)).get()
+                mid_t   = self.target_vars.get(f'mid_{road}_{suffix}', tk.IntVar(value=0)).get()
+                long_t  = self.target_vars.get(f'long_{road}_{suffix}', tk.IntVar(value=0)).get()
+                # B/C值以百分存储(×100)，需除以100显示
+                if suffix == 'BCR':
+                    cur_fmt = f'{cur_val:.2f}'
+                    s_fmt = f'{short_t/100:.2f}'
+                    m_fmt = f'{mid_t/100:.2f}'
+                    l_fmt = f'{long_t/100:.2f}'
+                else:
+                    cur_fmt = f'{cur_val:.1f}'; s_fmt = f'{short_t}'; m_fmt = f'{mid_t}'; l_fmt = f'{long_t}'
+                self.target_tree.insert('','end',values=('技术/经济',road,metric,cur_fmt,s_fmt,m_fmt,l_fmt))
+        self.status_var.set('目标对比完成')
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  页面4: 预测模型
+    # ══════════════════════════════════════════════════════════════════════════
+    def _build_page4(self, parent):
+        self._section_title(parent, '📈 性能预测模型')
+        self._section_sub(parent, '使用指数衰减模型 PQI(t)=PQI₀×e^(-k×t)，基于历年数据回归标定')
+
+        card = self._card(parent, '模型参数')
+        r = self._row(card)
+        tk.Label(r, text='县份：', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left')
+        self.model_county_var = tk.StringVar(value='全部')
+        self.model_county_cb = ttk.Combobox(r, textvariable=self.model_county_var, width=12, state='readonly', values=['全部'])
+        self.model_county_cb.pack(side='left', padx=8)
+        tk.Button(r, text='计算衰减率', command=self._calc_decay,
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 10), padx=12, cursor='hand2').pack(side='left', padx=10)
+        tk.Button(r, text='5年预测', command=self._gen_prediction,
+                 font=('Microsoft YaHei', 9), padx=8).pack(side='left', padx=5)
+        tk.Button(r, text='养护计划', command=self._calc_maint_plan,
+                 font=('Microsoft YaHei', 9), padx=8).pack(side='left', padx=5)
+
         # 衰减率表格
-        table_card = ttk.LabelFrame(self.decay_frame, text='衰减系数标定结果', padding=10)
-        table_card.pack(fill='both', expand=True)
-        
-        cols = ('路面类型', '技术等级', 'PQI衰减系数k', 'PCI衰减系数k', 'RQI衰减系数k', '有效样本数')
-        self.decay_tree = ttk.Treeview(table_card, columns=cols, show='headings', height=10)
-        
-        col_widths = {'路面类型': 90, '技术等级': 80, 'PQI衰减系数k': 110, 
-                      'PCI衰减系数k': 110, 'RQI衰减系数k': 110, '有效样本数': 90}
-        for col in cols:
-            self.decay_tree.heading(col, text=col)
-            self.decay_tree.column(col, width=col_widths[col], anchor='center')
-        
-        vsb = ttk.Scrollbar(table_card, orient='vertical', command=self.decay_tree.yview)
-        self.decay_tree.configure(yscrollcommand=vsb.set)
-        self.decay_tree.pack(side='left', fill='both', expand=True)
-        vsb.pack(side='right', fill='y')
-        
-        # 初始提示
-        self.decay_tree.insert('', 'end', values=('', '', '请加载数据后点击计算', '', '', ''))
-        
-        # 关键发现
-        self.insight_card = ttk.LabelFrame(self.decay_frame, text='关键发现', padding=10)
-        self.insight_card.pack(fill='x', pady=(10, 0))
-        self.insight_text_var = tk.StringVar(value='加载数据并计算后显示关键发现')
-        ttk.Label(self.insight_card, textvariable=self.insight_text_var, justify='left', 
-                  font=('Microsoft YaHei', 9), foreground=THEME['text']).pack(anchor='w')
+        card2 = self._card(parent, '衰减系数标定', expand=True)
+        cols = ('路面类型','技术等级','PQI衰减k','PCI衰减k','RQI衰减k','样本数')
+        self.decay_tree = ttk.Treeview(card2, columns=cols, show='headings', height=6)
+        for c in cols: self.decay_tree.heading(c, text=c); self.decay_tree.column(c, width=110, anchor='center')
+        self.decay_tree.pack(fill='both', expand=True)
+        r = self._row(parent, 5)
+        tk.Button(r, text='📥 导出', command=lambda:self._export_tree(self.decay_tree), font=('Microsoft YaHei',9)).pack(side='left', padx=20)
 
-    # ── Tab 2: 5年PQI预测 ──
-    def _build_prediction_tab(self):
-        # 外层容器（用于添加滚动条）
-        outer_frame = ttk.Frame(self.model_notebook)
-        self.model_notebook.add(outer_frame, text=' 5年PQI预测 ')
-        
-        # Canvas + Scrollbar 实现垂直滚动
-        pred_canvas = tk.Canvas(outer_frame, highlightthickness=0)
-        pred_vsb = ttk.Scrollbar(outer_frame, orient='vertical', command=pred_canvas.yview)
-        pred_canvas.configure(yscrollcommand=pred_vsb.set)
-        pred_vsb.pack(side='right', fill='y')
-        pred_canvas.pack(side='left', fill='both', expand=True)
-        
-        # 鼠标滚轮绑定
-        def _on_mousewheel(event):
-            pred_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
-        pred_canvas.bind_all('<MouseWheel>', _on_mousewheel, add='+')
-        self._pred_canvas = pred_canvas  # 保存引用以便解绑
-        
-        # 内层可滚动框架
-        self.pred_frame = ttk.Frame(pred_canvas)
-        pred_canvas.create_window((0, 0), window=self.pred_frame, anchor='nw')
-        self.pred_frame.bind('<Configure>', lambda e: pred_canvas.configure(scrollregion=pred_canvas.bbox('all')))
-        
-        # 按钮 + 导出复制
-        btn_frame = ttk.Frame(self.pred_frame)
-        btn_frame.pack(fill='x', padx=10, pady=10)
-        ttk.Button(btn_frame, text='生成5年预测表', command=self._generate_prediction,
-                   style='Primary.TButton').pack(side='left')
-        tk.Button(btn_frame, text='📥 导出Excel', command=self._export_prediction_excel).pack(side='left', padx=5)
-        tk.Button(btn_frame, text='📋 复制', command=self._copy_prediction_to_clipboard).pack(side='left')
-        
-        # 表格（使用Frame包裹以便使用grid布局）
-        table_frame = ttk.Frame(self.pred_frame)
-        table_frame.pack(fill='both', expand=True, padx=10, pady=(0, 10))
+        # 预测结果表格
+        card3 = self._card(parent, '预测/计划结果', expand=True)
+        self.pred_tree = ttk.Treeview(card3, show='headings', height=8)
+        self.pred_tree.pack(fill='both', expand=True)
 
-        table_label = ttk.LabelFrame(table_frame, text='各线路5年PQI/PCI/RQI预测值', padding=10)
-        table_label.pack(fill='both', expand=True)
-        
-        self.pred_tree = ttk.Treeview(table_label, show='headings', height=12)
-        
-        # 滚动条（垂直+水平）
-        vsb = ttk.Scrollbar(table_label, orient='vertical', command=self.pred_tree.yview)
-        hsb = ttk.Scrollbar(table_label, orient='horizontal', command=self.pred_tree.xview)
-        self.pred_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        
-        # 表格 + 滚动条布局
-        self.pred_tree.grid(row=0, column=0, sticky='nsew')
-        vsb.grid(row=0, column=1, sticky='ns')
-        hsb.grid(row=1, column=0, sticky='ew')
-        
-        # 配置grid权重
-        table_label.grid_rowconfigure(0, weight=1)
-        table_label.grid_columnconfigure(0, weight=1)
-        
-        # 初始提示
-        self.pred_tree.insert('', 'end', values=('请先加载数据并点击生成按钮',))
-        
-        # ════════════════════════════════════════
-        # 养护触发模型参数（可选启用/禁用）
-        # ════════════════════════════════════════
-        trigger_card = ttk.LabelFrame(self.pred_frame, text='养护触发模型参数（可手动调整）', padding=10)
-        trigger_card.pack(fill='x', padx=10, pady=(0, 10))
-        
-        # 启用/禁用开关
-        trigger_top = ttk.Frame(trigger_card)
-        trigger_top.pack(fill='x', pady=(0, 5))
-        
-        self.trigger_enabled_var = tk.BooleanVar(value=True)
-        self.trigger_check = tk.Checkbutton(
-            trigger_top, text='启用养护触发模型（生成预测时根据触发条件判断养护类型并回调）',
-            variable=self.trigger_enabled_var, font=('Microsoft YaHei', 9),
-            command=self._on_trigger_toggle)
-        self.trigger_check.pack(side='left')
-        
-        # 年度配置：按年份设置是否启用养护触发
-        yearly_frame = ttk.Frame(trigger_card)
-        yearly_frame.pack(fill='x', pady=(5, 0))
-        
-        ttk.Label(yearly_frame, text='年度养护触发配置：', font=('Microsoft YaHei', 9, 'bold')).pack(side='left', padx=(0, 5))
-        
-        self.yearly_trigger_vars = {}
-        for year in range(2026, 2031):
-            var = tk.BooleanVar(value=True)
-            self.yearly_trigger_vars[year] = var
-            chk = tk.Checkbutton(
-                yearly_frame, text=f'{year}年', variable=var, font=('Microsoft YaHei', 9),
-                width=10)
-            chk.pack(side='left', padx=2)
-        
-        # 触发模型参数容器（启用时显示，禁用时灰化）
-        self.trigger_params_frame = ttk.Frame(trigger_card)
-        self.trigger_params_frame.pack(fill='x')
-        
-        # 加载当前触发模型配置
-        current_trigger = {}
-        if get_trigger_model:
-            try:
-                current_trigger = get_trigger_model()
-            except:
-                pass
-        
+    def _calc_decay(self):
+        from src.decay_calculator import calculate_decay_rates, get_calibration_table
+        df = self._get_data(self.model_county_var.get())
+        if df.empty: return
+        c = None if self.model_county_var.get()=='全部' else self.model_county_var.get()
+        table = get_calibration_table(df, c)
+        self.decay_tree.delete(*self.decay_tree.get_children())
+        for row in table: self.decay_tree.insert('','end',values=row)
+        self.mark_step_done(4); self.status_var.set('衰减率标定完成')
+
+    def _gen_prediction(self):
+        from src.decay_calculator import predict_5year_pqi
+        df = self._get_data(self.model_county_var.get() or None)
+        if df.empty: return
+        c = None if self.model_county_var.get() in ['全部',''] else self.model_county_var.get()
+        result = predict_5year_pqi(df, c)
+        if result is not None and not result.empty:
+            self._df_to_tree(self.pred_tree, result)
+            self.status_var.set(f'5年预测完成 — {len(result)}条路线')
+
+    def _calc_maint_plan(self):
+        from src.decay_calculator import get_yearly_summary
+        df = self._get_data(self.model_county_var.get() or None)
+        if df.empty: return
+        c = None if self.model_county_var.get() in ['全部',''] else self.model_county_var.get()
+        result = get_yearly_summary(df, c)
+        if result is not None and not result.empty:
+            self._df_to_tree(self.pred_tree, result)
+            self.status_var.set('养护计划计算完成')
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  页面5: 养护对策
+    # ══════════════════════════════════════════════════════════════════════════
+    def _build_page5(self, parent):
+        # 可滚动
+        cvs = tk.Canvas(parent, bg=THEME['bg'], highlightthickness=0)
+        vsb = ttk.Scrollbar(parent, orient='vertical', command=cvs.yview)
+        cvs.configure(yscrollcommand=vsb.set)
+        vsb.pack(side='right', fill='y'); cvs.pack(side='left', fill='both', expand=True)
+        sf = tk.Frame(cvs, bg=THEME['bg'])
+        wid = cvs.create_window((0,0), window=sf, anchor='nw', tags=('sframe',))
+        def _cfg(e):
+            cvs.itemconfig(wid, width=e.width)
+            cvs.configure(scrollregion=cvs.bbox('all'))
+        cvs.bind('<Configure>', _cfg)
+        sf.bind('<Configure>', lambda e: cvs.configure(scrollregion=cvs.bbox('all')))
+
+        self._section_title(sf, '⚙️ 养护对策模型')
+        self._section_sub(sf, '配置养护触发阈值、养护后路面状况回调值及养护方案单价')
+
+        # 一、触发阈值
+        card = self._card(sf, '一、养护触发阈值')
         self.trigger_vars = {}
-        
-        # ── 路面改造条件 ──
-        reform_label = ttk.Label(self.trigger_params_frame, text='【路面改造条件】满足任一指标即触发',
-                                  font=('Microsoft YaHei', 9, 'bold'))
-        reform_label.pack(anchor='w', pady=(5, 1))
-        
-        # 路面改造参数表头
-        reform_header = ttk.Frame(self.trigger_params_frame)
-        reform_header.pack(fill='x', padx=5, pady=2)
-        headers = ['路面类型', '技术等级', 'PCI阈值', 'PCI参与', 'PQI阈值', 'PQI参与', 'RQI阈值', 'RQI参与']
-        col_widths = [10, 10, 6, 6, 6, 6, 6, 6]
-        for h, w in zip(headers, col_widths):
-            ttk.Label(reform_header, text=h, width=w, anchor='center',
-                      font=('Microsoft YaHei', 8, 'bold')).pack(side='left', padx=6)
-        
-        # 路面改造参数行
-        reform_rows = [
-            ('沥青路面', '一级公路', True, True, True),
-            ('沥青路面', '二级及以下', True, True, True),
-            ('水泥路面', '一级公路', True, True, False),
-            ('水泥路面', '二级及以下', True, True, False),
-        ]
-        for ptype, grade, pci_on, pqi_on, rqion in reform_rows:
-            row_f = ttk.Frame(self.trigger_params_frame)
-            row_f.pack(fill='x', padx=5, pady=0)
-            
-            ttk.Label(row_f, text=ptype, width=10, anchor='center').pack(side='left', padx=2)
-            ttk.Label(row_f, text=grade, width=10, anchor='center').pack(side='left', padx=2)
-            
-            cfg = current_trigger.get('路面改造', {}).get(ptype, {}).get(grade, {})
-            
-            pci_var = tk.IntVar(value=cfg.get('PCI', 80))
-            pci_on_var = tk.BooleanVar(value=cfg.get('PCI启用', pci_on))
-            pqi_var = tk.IntVar(value=cfg.get('PQI', 80))
-            pqi_on_var = tk.BooleanVar(value=cfg.get('PQI启用', pqi_on))
-            rqi_var = tk.IntVar(value=cfg.get('RQI', 80))
-            rqion_var = tk.BooleanVar(value=cfg.get('RQI启用', rqion))
-            
-            self.trigger_vars[f'改造_{ptype}_{grade}_PCI'] = pci_var
-            self.trigger_vars[f'改造_{ptype}_{grade}_PCI启用'] = pci_on_var
-            self.trigger_vars[f'改造_{ptype}_{grade}_PQI'] = pqi_var
-            self.trigger_vars[f'改造_{ptype}_{grade}_PQI启用'] = pqi_on_var
-            self.trigger_vars[f'改造_{ptype}_{grade}_RQI'] = rqi_var
-            self.trigger_vars[f'改造_{ptype}_{grade}_RQI启用'] = rqion_var
-            
-            pci_entry = ttk.Entry(row_f, textvariable=pci_var, width=6)
-            pci_entry.pack(side='left', padx=2)
-            pci_check = tk.Checkbutton(row_f, text='', variable=pci_on_var, width=6,
-                                        command=lambda e=pci_entry, v=pci_on_var: e.configure(
-                                            state='normal' if v.get() else 'disabled'))
-            pci_check.pack(side='left', padx=2)
-            if not pci_on_var.get():
-                pci_entry.configure(state='disabled')
-                
-            pqi_entry = ttk.Entry(row_f, textvariable=pqi_var, width=6)
-            pqi_entry.pack(side='left', padx=2)
-            pqi_check = tk.Checkbutton(row_f, text='', variable=pqi_on_var, width=6,
-                                        command=lambda e=pqi_entry, v=pqi_on_var: e.configure(
-                                            state='normal' if v.get() else 'disabled'))
-            pqi_check.pack(side='left', padx=2)
-            if not pqi_on_var.get():
-                pqi_entry.configure(state='disabled')
-                
-            rqi_entry = ttk.Entry(row_f, textvariable=rqi_var, width=6)
-            rqi_entry.pack(side='left', padx=2)
-            rqi_check = tk.Checkbutton(row_f, text='', variable=rqion_var, width=6,
-                                        command=lambda e=rqi_entry, v=rqion_var: e.configure(
-                                            state='normal' if v.get() else 'disabled'))
-            rqi_check.pack(side='left', padx=2)
-            if not rqion_var.get():
-                rqi_entry.configure(state='disabled')
-        
-        # ── 预防养护条件 ──
-        prev_label = ttk.Label(self.trigger_params_frame, text='【预防养护条件】不满足路面改造时，需同时满足',
-                                font=('Microsoft YaHei', 9, 'bold'))
-        prev_label.pack(anchor='w', pady=(8, 2))
-        
-        # 预防养护参数表头
-        prev_header = ttk.Frame(self.trigger_params_frame)
-        prev_header.pack(fill='x', padx=5, pady=2)
-        prev_headers = ['路面类型', '技术等级', 'PCI低', 'PCI高', 'PCI参与', 'RQI低', 'RQI高', 'RQI参与', 'PQI≥', 'PQI参与']
-        prev_widths = [10, 10, 5, 5, 6, 5, 5, 6, 5, 6]
-        for h, w in zip(prev_headers, prev_widths):
-            ttk.Label(prev_header, text=h, width=w, anchor='center',
-                      font=('Microsoft YaHei', 8, 'bold')).pack(side='left', padx=6)
-        
-        # 预防养护参数行
-        prev_rows = [
-            ('沥青路面', '一级公路', 80, 90, True, 80, 90, True, 80, True),
-            ('沥青路面', '二级及以下', 78, 85, True, 78, 85, True, 75, True),
-            ('水泥路面', '一级公路', 80, 90, True, 60, 85, False, 80, True),
-            ('水泥路面', '二级及以下', 78, 85, True, 60, 85, False, 75, True),
-        ]
-        for ptype, grade, pci_lo, pci_hi, pci_on, rqi_lo, rqi_hi, rqi_on, pqi_min, pqi_on in prev_rows:
-            row_f = ttk.Frame(self.trigger_params_frame)
-            row_f.pack(fill='x', padx=5, pady=0)
-            
-            ttk.Label(row_f, text=ptype, width=10, anchor='center').pack(side='left', padx=2)
-            ttk.Label(row_f, text=grade, width=10, anchor='center').pack(side='left', padx=2)
-            
-            cfg = current_trigger.get('预防性养护', {}).get(ptype, {}).get(grade, {})
-            
-            pci_lo_var = tk.IntVar(value=cfg.get('PCI低', pci_lo))
-            pci_hi_var = tk.IntVar(value=cfg.get('PCI高', pci_hi))
-            pci_on_var = tk.BooleanVar(value=cfg.get('PCI启用', pci_on))
-            rqi_lo_var = tk.IntVar(value=cfg.get('RQI低', rqi_lo))
-            rqi_hi_var = tk.IntVar(value=cfg.get('RQI高', rqi_hi))
-            rqi_on_var = tk.BooleanVar(value=cfg.get('RQI启用', rqi_on))
-            pqi_var = tk.IntVar(value=cfg.get('PQI', pqi_min))
-            pqi_on_var = tk.BooleanVar(value=cfg.get('PQI启用', pqi_on))
-            
-            self.trigger_vars[f'预防_{ptype}_{grade}_PCI低'] = pci_lo_var
-            self.trigger_vars[f'预防_{ptype}_{grade}_PCI高'] = pci_hi_var
-            self.trigger_vars[f'预防_{ptype}_{grade}_PCI启用'] = pci_on_var
-            self.trigger_vars[f'预防_{ptype}_{grade}_RQI低'] = rqi_lo_var
-            self.trigger_vars[f'预防_{ptype}_{grade}_RQI高'] = rqi_hi_var
-            self.trigger_vars[f'预防_{ptype}_{grade}_RQI启用'] = rqi_on_var
-            self.trigger_vars[f'预防_{ptype}_{grade}_PQI'] = pqi_var
-            self.trigger_vars[f'预防_{ptype}_{grade}_PQI启用'] = pqi_on_var
-            
-            pci_lo_entry = ttk.Entry(row_f, textvariable=pci_lo_var, width=5)
-            pci_lo_entry.pack(side='left', padx=2)
-            pci_hi_entry = ttk.Entry(row_f, textvariable=pci_hi_var, width=5)
-            pci_hi_entry.pack(side='left', padx=2)
-            pci_check = tk.Checkbutton(row_f, text='', variable=pci_on_var, width=6,
-                                       command=lambda lo=pci_lo_entry, hi=pci_hi_entry, v=pci_on_var: (
-                                           lo.configure(state='normal' if v.get() else 'disabled'),
-                                           hi.configure(state='normal' if v.get() else 'disabled')))
-            pci_check.pack(side='left', padx=6)
-            if not pci_on_var.get():
-                pci_lo_entry.configure(state='disabled')
-                pci_hi_entry.configure(state='disabled')
-            
-            rqi_lo_entry = ttk.Entry(row_f, textvariable=rqi_lo_var, width=5)
-            rqi_lo_entry.pack(side='left', padx=2)
-            rqi_hi_entry = ttk.Entry(row_f, textvariable=rqi_hi_var, width=5)
-            rqi_hi_entry.pack(side='left', padx=2)
-            rqi_check = tk.Checkbutton(row_f, text='', variable=rqi_on_var, width=6,
-                                       command=lambda lo=rqi_lo_entry, hi=rqi_hi_entry, v=rqi_on_var: (
-                                           lo.configure(state='normal' if v.get() else 'disabled'),
-                                           hi.configure(state='normal' if v.get() else 'disabled')))
-            rqi_check.pack(side='left', padx=6)
-            if not rqi_on_var.get():
-                rqi_lo_entry.configure(state='disabled')
-                rqi_hi_entry.configure(state='disabled')
-            
-            pqi_entry = ttk.Entry(row_f, textvariable=pqi_var, width=5)
-            pqi_entry.pack(side='left', padx=2)
-            pqi_check = tk.Checkbutton(row_f, text='', variable=pqi_on_var, width=6,
-                                       command=lambda e=pqi_entry, v=pqi_on_var: e.configure(
-                                           state='normal' if v.get() else 'disabled'))
-            pqi_check.pack(side='left', padx=6)
-            if not pqi_on_var.get():
-                pqi_entry.configure(state='disabled')
-        
-        # 触发模型按钮
-        trigger_btn_frame = ttk.Frame(trigger_card)
-        trigger_btn_frame.pack(fill='x', pady=(5, 0))
-        
-        ttk.Button(trigger_btn_frame, text='保存触发参数', command=self._save_trigger_config,
-                   style='Primary.TButton', width=13).pack(side='left', padx=5)
-        ttk.Button(trigger_btn_frame, text='恢复默认', command=self._reset_trigger_config,
-                   style='Primary.TButton', width=10).pack(side='left', padx=5)
-        
-        # 养护回调参数配置
-        callback_card = ttk.LabelFrame(self.pred_frame, text='养护后PQI回调参数（可手动调整）', padding=10)
-        callback_card.pack(fill='x', padx=10, pady=(0, 10))
+        tk.Label(card, text='【路面改造】满足任一条件即触发', bg=THEME['card'],
+                fg=THEME['accent'], font=('Microsoft YaHei', 9, 'bold')).pack(anchor='w')
+        h = self._row(card, 3)
+        for t,w in [('路面类型',10),('技术等级',10),('PCI',6),('PQI',6),('RQI',6)]:
+            tk.Label(h, text=t, width=w, bg=THEME['card'], font=('Microsoft YaHei',8,'bold')).pack(side='left')
+        for m,pt,g, dpci,dpqi,drqi in [
+            ('路面改造','沥青路面','一级公路',80,80,80),('路面改造','沥青路面','二级及以下',75,75,75),
+            ('路面改造','水泥路面','一级公路',80,80,80),('路面改造','水泥路面','二级及以下',75,75,75),
+        ]:
+            r = self._row(card, 2)
+            tk.Label(r, text=pt, width=10, bg=THEME['card']).pack(side='left')
+            tk.Label(r, text=g, width=10, bg=THEME['card']).pack(side='left')
+            for idx,dv in [('PCI',dpci),('PQI',dpqi),('RQI',drqi)]:
+                v = tk.IntVar(value=dv); self.trigger_vars[f'{m}_{pt}_{g}_{idx}'] = v
+                ttk.Entry(r, textvariable=v, width=6).pack(side='left')
 
-        # 回调参数变量
+        tk.Label(card, text='【预防性养护】不满足路面改造时，条件触发', bg=THEME['card'],
+                fg=THEME['success'], font=('Microsoft YaHei', 9, 'bold')).pack(anchor='w', pady=(10,0))
+        h2 = self._row(card, 3)
+        for t,w in [('路面类型',10),('技术等级',10),('PCI下限',7),('PCI上限',7),('PQI≥',5)]:
+            tk.Label(h2, text=t, width=w, bg=THEME['card'], font=('Microsoft YaHei',8,'bold')).pack(side='left')
+        for m,pt,g, plo,phi,pqi in [
+            ('预防性养护','沥青路面','一级公路',80,90,80),('预防性养护','沥青路面','二级及以下',78,85,75),
+            ('预防性养护','水泥路面','一级公路',80,90,80),('预防性养护','水泥路面','二级及以下',78,85,75),
+        ]:
+            r = self._row(card, 2)
+            tk.Label(r, text=pt, width=10, bg=THEME['card']).pack(side='left')
+            tk.Label(r, text=g, width=10, bg=THEME['card']).pack(side='left')
+            for idx,dv in [('PCI低',plo),('PCI高',phi),('PQI',pqi)]:
+                v = tk.IntVar(value=dv); self.trigger_vars[f'{m}_{pt}_{g}_{idx}'] = v
+                ttk.Entry(r, textvariable=v, width=6).pack(side='left')
+
+        # 二、回调值
+        card2 = self._card(sf, '二、养护后PQI/PCI/RQI回调值 — 养护后路面回升到的目标值')
         self.callback_vars = {}
-        
-        # 定义回调参数配置项
-        callback_fields = [
-            ('路面改造-沥青PQI', '路面改造', '沥青路面', 'PQI'),
-            ('路面改造-沥青PCI', '路面改造', '沥青路面', 'PCI'),
-            ('路面改造-沥青RQI', '路面改造', '沥青路面', 'RQI'),
-            ('路面改造-水泥PQI', '路面改造', '水泥路面', 'PQI'),
-            ('路面改造-水泥PCI', '路面改造', '水泥路面', 'PCI'),
-            ('路面改造-水泥RQI', '路面改造', '水泥路面', 'RQI'),
-            ('预防养护-沥青PQI', '预防性养护', '沥青路面', 'PQI'),
-            ('预防养护-沥青PCI', '预防性养护', '沥青路面', 'PCI'),
-            ('预防养护-沥青RQI', '预防性养护', '沥青路面', 'RQI'),
-            ('预防养护-水泥PQI', '预防性养护', '水泥路面', 'PQI'),
-            ('预防养护-水泥PCI', '预防性养护', '水泥路面', 'PCI'),
-            ('预防养护-水泥RQI', '预防性养护', '水泥路面', 'RQI'),
-        ]
+        h3 = self._row(card2, 3)
+        for t,w in [('养护类型',12),('路面类型',10),('PQI回升值',9),('PCI回升值',9),('RQI回升值',9)]:
+            tk.Label(h3, text=t, width=w, bg=THEME['card'], font=('Microsoft YaHei',8,'bold')).pack(side='left')
+        for m,pt,dpqi,dpci,drqi in [
+            ('路面改造','沥青路面',92,92,93),('路面改造','水泥路面',88,88,90),
+            ('预防性养护','沥青路面',89,89,91),('预防性养护','水泥路面',86,86,88),
+        ]:
+            r = self._row(card2, 2)
+            tk.Label(r, text=m, width=12, bg=THEME['card']).pack(side='left')
+            tk.Label(r, text=pt, width=10, bg=THEME['card']).pack(side='left')
+            for idx,dv in [('PQI',dpqi),('PCI',dpci),('RQI',drqi)]:
+                v = tk.IntVar(value=dv); self.callback_vars[f'{m}_{pt}_{idx}'] = v
+                ttk.Entry(r, textvariable=v, width=8).pack(side='left')
 
-        # 加载当前配置
-        current_callback = {}
-        if get_maintenance_callback:
-            try:
-                current_callback = get_maintenance_callback()
-            except:
-                pass
+        # 三、单价
+        card3 = self._card(sf, '三、养护方案单价 — 用户自定义')
+        self.price_vars = {}
+        h4 = self._row(card3, 3)
+        for t,w in [('养护类型',12),('路面类型',10),('单价(元/m²)',12)]:
+            tk.Label(h4, text=t, width=w, bg=THEME['card'], font=('Microsoft YaHei',8,'bold')).pack(side='left')
+        for m,pt,dp in [
+            ('路面改造','沥青路面',319),('路面改造','水泥路面',299),
+            ('预防性养护','沥青路面',160),('预防性养护','水泥路面',140),
+            ('日常养护','沥青路面',30),('日常养护','水泥路面',25),
+        ]:
+            r = self._row(card3, 2)
+            tk.Label(r, text=m, width=12, bg=THEME['card']).pack(side='left')
+            tk.Label(r, text=pt, width=10, bg=THEME['card']).pack(side='left')
+            v = tk.IntVar(value=dp); self.price_vars[f'{m}_{pt}'] = v
+            ttk.Entry(r, textvariable=v, width=10).pack(side='left')
 
-        # 创建输入框（两列布局）
-        for i, (label, maint_type, ptype, idx) in enumerate(callback_fields):
-            row = i // 2
-            col = i % 2
-            
-            if i % 2 == 0:
-                callback_row = ttk.Frame(callback_card)
-                callback_row.pack(fill='x', pady=2)
-            
-            field_frame = ttk.Frame(callback_row)
-            field_frame.pack(side='left', padx=15, pady=2)
-            
-            tk.Label(field_frame, text=f'{label}：', width=14).pack(side='left')
-            
-            var = tk.IntVar()
-            # 从当前配置获取值，如果没有则用默认值
-            default_val = current_callback.get(maint_type, {}).get(ptype, {}).get(idx, 90)
-            var.set(default_val)
-            self.callback_vars[f'{maint_type}_{ptype}_{idx}'] = var
-            
-            ttk.Entry(field_frame, textvariable=var, width=6).pack(side='left')
+        # 按钮
+        r = self._row(sf, 15)
+        tk.Button(r, text='💾 保存全部配置', command=self._save_policy_config,
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 10, 'bold'),
+                 padx=18, pady=4, cursor='hand2').pack(side='left', padx=20)
+        tk.Button(r, text='↺ 恢复默认', command=self._reset_policy_config,
+                 font=('Microsoft YaHei', 9), padx=12).pack(side='left', padx=5)
 
-        # 回调参数按钮
-        callback_btn_frame = ttk.Frame(self.pred_frame)
-        callback_btn_frame.pack(fill='x', padx=10, pady=(0, 10))
-        
-        tk.Button(callback_btn_frame, text='💾 保存回调参数', command=self._save_callback_config,
-                   bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9),
-                   padx=10, pady=3, cursor='hand2', width=15).pack(side='left', padx=5)
-        tk.Button(callback_btn_frame, text='↺ 恢复默认', command=self._reset_callback_config,
-                   bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9),
-                   padx=10, pady=3, cursor='hand2', width=12).pack(side='left')
+    def _save_policy_config(self):
+        cfg = self.config
+        cfg['triggers'] = {k:v.get() for k,v in self.trigger_vars.items()}
+        cfg['callbacks'] = {k:v.get() for k,v in self.callback_vars.items()}
+        cfg['prices'] = {k:v.get() for k,v in self.price_vars.items()}
+        if set_maintenance_callback:
+            cb = {}
+            for ks, var in self.callback_vars.items():
+                ps = ks.split('_'); mt=ps[0]; pt=ps[1]; idx=ps[2]
+                if mt not in cb: cb[mt] = {}
+                if pt not in cb[mt]: cb[mt][pt] = {}
+                cb[mt][pt][idx] = var.get()
+            set_maintenance_callback(cb); cfg['maintenance_callback'] = cb
+        with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        self.mark_step_done(5)
+        self.status_var.set('养护对策配置已保存')
+        messagebox.showinfo('成功','养护对策配置已保存！\n\n- 触发阈值\n- 回调值\n- 单价\n\n参数即时生效，可执行需求分析。')
 
-    # ── Tab 3: PQI-Proj. IMP（手动养护规划）──
-    def _build_pqi_proj_tab(self):
-        outer_frame = ttk.Frame(self.model_notebook)
-        self.model_notebook.add(outer_frame, text=' PQI-Proj. IMP ')
-        
-        pred_canvas = tk.Canvas(outer_frame, highlightthickness=0)
-        pred_vsb = ttk.Scrollbar(outer_frame, orient='vertical', command=pred_canvas.yview)
-        pred_canvas.configure(yscrollcommand=pred_vsb.set)
-        pred_vsb.pack(side='right', fill='y')
-        pred_canvas.pack(side='left', fill='both', expand=True)
-        
-        def _on_mousewheel(event):
-            pred_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
-        pred_canvas.bind_all('<MouseWheel>', _on_mousewheel, add='+')
-        
-        self.pqi_proj_frame = ttk.Frame(pred_canvas)
-        pred_canvas.create_window((0, 0), window=self.pqi_proj_frame, anchor='nw')
-        self.pqi_proj_frame.bind('<Configure>', lambda e: pred_canvas.configure(scrollregion=pred_canvas.bbox('all')))
-        
-        btn_frame = ttk.Frame(self.pqi_proj_frame)
-        btn_frame.pack(fill='x', padx=10, pady=10)
-        ttk.Button(btn_frame, text='生成5年预测表', command=self._generate_pqi_proj,
-                   style='Primary.TButton').pack(side='left')
-        tk.Button(btn_frame, text='📥 导出Excel', command=self._export_pqi_proj_excel).pack(side='left', padx=5)
-        tk.Button(btn_frame, text='📋 复制', command=self._copy_pqi_proj_to_clipboard).pack(side='left')
-        
-        table_frame = ttk.Frame(self.pqi_proj_frame)
-        table_frame.pack(fill='both', expand=True, padx=10, pady=(0, 10))
-        
-        table_label = ttk.LabelFrame(table_frame, text='各线路5年PQI/PCI/RQI预测值（手动养护规划）', padding=10)
-        table_label.pack(fill='both', expand=True)
-        
-        self.pqi_proj_tree = ttk.Treeview(table_label, show='headings', height=12)
-        
-        vsb = ttk.Scrollbar(table_label, orient='vertical', command=self.pqi_proj_tree.yview)
-        hsb = ttk.Scrollbar(table_label, orient='horizontal', command=self.pqi_proj_tree.xview)
-        self.pqi_proj_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        
-        self.pqi_proj_tree.grid(row=0, column=0, sticky='nsew')
-        vsb.grid(row=0, column=1, sticky='ns')
-        hsb.grid(row=1, column=0, sticky='ew')
-        
-        table_label.grid_rowconfigure(0, weight=1)
-        table_label.grid_columnconfigure(0, weight=1)
-        
-        self.pqi_proj_tree.insert('', 'end', values=('请先加载数据并点击生成按钮',))
-        
-        manual_plan_card = ttk.LabelFrame(self.pqi_proj_frame, text='手动养护规划（指定路段进行养护）', padding=10)
-        manual_plan_card.pack(fill='x', padx=10, pady=(0, 10))
-        
-        plan_row1 = ttk.Frame(manual_plan_card)
-        plan_row1.pack(fill='x', pady=5)
-        
-        ttk.Label(plan_row1, text='路线编码：', width=10).pack(side='left')
-        self.manual_route_var = tk.StringVar()
-        ttk.Entry(plan_row1, textvariable=self.manual_route_var, width=15).pack(side='left', padx=5)
-        
-        ttk.Label(plan_row1, text='路段起点：', width=10).pack(side='left')
-        self.manual_start_var = tk.StringVar()
-        ttk.Entry(plan_row1, textvariable=self.manual_start_var, width=12).pack(side='left', padx=5)
-        
-        ttk.Label(plan_row1, text='路段终点：', width=10).pack(side='left')
-        self.manual_end_var = tk.StringVar()
-        ttk.Entry(plan_row1, textvariable=self.manual_end_var, width=12).pack(side='left', padx=5)
-        
-        plan_row2 = ttk.Frame(manual_plan_card)
-        plan_row2.pack(fill='x', pady=5)
-        
-        ttk.Label(plan_row2, text='养护年份：', width=10).pack(side='left')
-        self.manual_year_var = tk.StringVar(value='2026')
-        ttk.Combobox(plan_row2, textvariable=self.manual_year_var, values=[str(y) for y in range(2026, 2031)], width=8).pack(side='left', padx=5)
-        
-        ttk.Label(plan_row2, text='养护类型：', width=10).pack(side='left')
-        self.manual_maint_type_var = tk.StringVar(value='预防性养护')
-        ttk.Combobox(plan_row2, textvariable=self.manual_maint_type_var, values=['路面改造', '预防性养护'], width=10).pack(side='left', padx=5)
-        
-        ttk.Button(plan_row2, text='添加养护规划', command=self._add_manual_maintenance,
-                   style='Primary.TButton').pack(side='left', padx=5)
-        ttk.Button(plan_row2, text='清空规划', command=self._clear_manual_maintenance,
-                   style='Primary.TButton').pack(side='left', padx=5)
-        
-        # 提示：如果不填写路段起终点，则对整个路线进行养护规划
-        hint_label = ttk.Label(manual_plan_card, text='提示：如果不填写路段起终点，则对整个路线进行养护规划', 
-                               font=('Microsoft YaHei', 8), foreground='#666666')
-        hint_label.pack(anchor='w', pady=(5, 0))
-        
-        self.manual_plan_list = ttk.LabelFrame(self.pqi_proj_frame, text='已添加的手动养护规划', padding=10)
-        self.manual_plan_list.pack(fill='x', padx=10, pady=(0, 10))
-        
-        manual_plan_frame = ttk.Frame(self.manual_plan_list)
-        manual_plan_frame.pack(fill='both', expand=True)
-        
-        self.manual_plan_tree = ttk.Treeview(manual_plan_frame, columns=('路线编码', '路段起点', '路段终点', '年份', '养护类型'), show='headings', height=5)
-        self.manual_plan_tree.heading('路线编码', text='路线编码')
-        self.manual_plan_tree.heading('路段起点', text='路段起点')
-        self.manual_plan_tree.heading('路段终点', text='路段终点')
-        self.manual_plan_tree.heading('年份', text='年份')
-        self.manual_plan_tree.heading('养护类型', text='养护类型')
-        self.manual_plan_tree.column('路线编码', width=70, anchor='center')
-        self.manual_plan_tree.column('路段起点', width=70, anchor='center')
-        self.manual_plan_tree.column('路段终点', width=70, anchor='center')
-        self.manual_plan_tree.column('年份', width=60, anchor='center')
-        self.manual_plan_tree.column('养护类型', width=80, anchor='center')
-        self.manual_plan_tree.grid(row=0, column=0)
-        
-        manual_plan_vscroll = ttk.Scrollbar(manual_plan_frame, orient='vertical', command=self.manual_plan_tree.yview)
-        manual_plan_vscroll.grid(row=0, column=1, sticky='ns')
-        self.manual_plan_tree.configure(yscrollcommand=manual_plan_vscroll.set)
-        
-        manual_plan_frame.grid_rowconfigure(0, weight=1)
-        
-        self.manual_plan_tree.bind('<<TreeviewSelect>>', self._on_manual_plan_select)
-        
-        self.manual_plans = []
-        
-        good_road_frame = ttk.Frame(self.pqi_proj_frame)
-        good_road_frame.pack(fill='x', padx=10, pady=(0, 10))
-        
-        good_road_btn_frame = ttk.Frame(good_road_frame)
-        good_road_btn_frame.pack(fill='x', pady=(0, 5))
-        tk.Button(good_road_btn_frame, text='📥 导出PQI优良路率', command=self._export_pqi_proj_good_road_excel).pack(side='left', padx=5)
-        tk.Button(good_road_btn_frame, text='📋 复制PQI优良路率', command=self._copy_pqi_proj_good_road_to_clipboard).pack(side='left')
-        
-        good_road_label = ttk.LabelFrame(good_road_frame, text='PQI优良路率', padding=10)
-        good_road_label.pack(fill='both', expand=True)
-        
-        self.pqi_proj_good_road_tree = ttk.Treeview(good_road_label, show='headings', height=8)
-        vsb = ttk.Scrollbar(good_road_label, orient='vertical', command=self.pqi_proj_good_road_tree.yview)
-        self.pqi_proj_good_road_tree.configure(yscrollcommand=vsb.set)
-        self.pqi_proj_good_road_tree.pack(side='left', fill='both', expand=True)
-        vsb.pack(side='right', fill='y')
-        
-        self.pqi_proj_good_road_tree.insert('', 'end', values=('请先生成5年预测表',))
-        
-        callback_card = ttk.LabelFrame(self.pqi_proj_frame, text='养护后PQI回调参数（可手动调整）', padding=10)
-        callback_card.pack(fill='x', padx=10, pady=(0, 10))
-        
-        self.pqi_proj_callback_vars = {}
-        
-        callback_fields = [
-            ('路面改造-沥青PQI', '路面改造', '沥青路面', 'PQI'),
-            ('路面改造-沥青PCI', '路面改造', '沥青路面', 'PCI'),
-            ('路面改造-沥青RQI', '路面改造', '沥青路面', 'RQI'),
-            ('路面改造-水泥PQI', '路面改造', '水泥路面', 'PQI'),
-            ('路面改造-水泥PCI', '路面改造', '水泥路面', 'PCI'),
-            ('路面改造-水泥RQI', '路面改造', '水泥路面', 'RQI'),
-            ('预防养护-沥青PQI', '预防性养护', '沥青路面', 'PQI'),
-            ('预防养护-沥青PCI', '预防性养护', '沥青路面', 'PCI'),
-            ('预防养护-沥青RQI', '预防性养护', '沥青路面', 'RQI'),
-            ('预防养护-水泥PQI', '预防性养护', '水泥路面', 'PQI'),
-            ('预防养护-水泥PCI', '预防性养护', '水泥路面', 'PCI'),
-            ('预防养护-水泥RQI', '预防性养护', '水泥路面', 'RQI'),
-        ]
-        
-        current_callback = {}
-        if get_maintenance_callback:
-            try:
-                current_callback = get_maintenance_callback()
-            except:
-                pass
-        
-        for i, (label, maint_type, ptype, idx) in enumerate(callback_fields):
-            row = i // 2
-            col = i % 2
-            
-            if i % 2 == 0:
-                callback_row = ttk.Frame(callback_card)
-                callback_row.pack(fill='x', pady=2)
-            
-            field_frame = ttk.Frame(callback_row)
-            field_frame.pack(side='left', padx=15, pady=2)
-            
-            tk.Label(field_frame, text=f'{label}：', width=14).pack(side='left')
-            
-            var = tk.IntVar()
-            default_val = current_callback.get(maint_type, {}).get(ptype, {}).get(idx, 90)
-            var.set(default_val)
-            self.pqi_proj_callback_vars[f'{maint_type}_{ptype}_{idx}'] = var
-            
-            ttk.Entry(field_frame, textvariable=var, width=6).pack(side='left')
-        
-        callback_btn_frame = ttk.Frame(self.pqi_proj_frame)
-        callback_btn_frame.pack(fill='x', padx=10, pady=(0, 10))
-        
-        tk.Button(callback_btn_frame, text='💾 保存回调参数', command=self._save_pqi_proj_callback_config,
-                   bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9),
-                   padx=10, pady=3, cursor='hand2', width=15).pack(side='left', padx=5)
-        tk.Button(callback_btn_frame, text='↺ 恢复默认', command=self._reset_pqi_proj_callback_config,
-                   bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9),
-                   padx=10, pady=3, cursor='hand2', width=12).pack(side='left')
-    
-    # ── Tab 4: 养护里程 ──
-    def _build_mileage_tab(self):
-        self.mileage_frame = ttk.Frame(self.model_notebook)
-        self.model_notebook.add(self.mileage_frame, text=' 养护里程 ')
-        
-        # 创建带滚动条的容器
-        canvas = tk.Canvas(self.mileage_frame)
-        vsb = ttk.Scrollbar(self.mileage_frame, orient='vertical', command=canvas.yview)
-        canvas.configure(yscrollcommand=vsb.set)
-        
-        vsb.pack(side='right', fill='y')
-        canvas.pack(side='left', fill='both', expand=True)
-        
-        # 内容框架
-        content_frame = ttk.Frame(canvas)
-        canvas.create_window((0, 0), window=content_frame, anchor='nw')
-        
-        def on_configure(event):
-            canvas.configure(scrollregion=canvas.bbox('all'))
-        
-        content_frame.bind('<Configure>', on_configure)
-        
-        # 模式选择
-        mode_frame = ttk.Frame(content_frame)
-        mode_frame.pack(fill='x', padx=10, pady=5)
-        ttk.Label(mode_frame, text='计算模式：', font=('Microsoft YaHei', 9, 'bold')).pack(side='left')
-        
-        self.mileage_mode_var = tk.StringVar(value='auto')
-        ttk.Radiobutton(mode_frame, text='自动养护触发', variable=self.mileage_mode_var, value='auto').pack(side='left', padx=10)
-        ttk.Radiobutton(mode_frame, text='手动养护规划', variable=self.mileage_mode_var, value='manual').pack(side='left', padx=10)
-        
-        # 按钮框架
-        btn_frame = ttk.Frame(content_frame)
-        btn_frame.pack(fill='x', padx=10, pady=10)
-        ttk.Button(btn_frame, text='生成养护里程表', command=self._generate_mileage,
-                   style='Primary.TButton').pack(side='left')
-        
-        # 表格1：自动养护触发
-        table_card1 = ttk.LabelFrame(content_frame, text='各线路5年养护里程（公里）- 自动养护触发', padding=10)
-        table_card1.pack(fill='x', padx=10, pady=(0, 5))
-        
-        btn_frame1 = ttk.Frame(table_card1)
-        btn_frame1.pack(fill='x', pady=(0, 5))
-        tk.Button(btn_frame1, text='📥 导出Excel', command=lambda: self._export_mileage_excel('auto')).pack(side='left', padx=5)
-        tk.Button(btn_frame1, text='📋 复制', command=lambda: self._copy_mileage_to_clipboard('auto')).pack(side='left')
-        
-        self.mileage_tree_auto = ttk.Treeview(table_card1, show='headings', height=10)
-        vsb1 = ttk.Scrollbar(table_card1, orient='vertical', command=self.mileage_tree_auto.yview)
-        self.mileage_tree_auto.configure(yscrollcommand=vsb1.set)
-        self.mileage_tree_auto.pack(side='left', fill='both', expand=True)
-        vsb1.pack(side='right', fill='y')
-        
-        self.mileage_tree_auto.insert('', 'end', values=('请点击生成按钮',))
-        
-        # 表格2：手动养护规划
-        table_card2 = ttk.LabelFrame(content_frame, text='各线路5年养护里程（公里）- 手动养护规划', padding=10)
-        table_card2.pack(fill='x', padx=10, pady=(0, 5))
-        
-        btn_frame2 = ttk.Frame(table_card2)
-        btn_frame2.pack(fill='x', pady=(0, 5))
-        tk.Button(btn_frame2, text='📥 导出Excel', command=lambda: self._export_mileage_excel('manual')).pack(side='left', padx=5)
-        tk.Button(btn_frame2, text='📋 复制', command=lambda: self._copy_mileage_to_clipboard('manual')).pack(side='left')
-        
-        self.mileage_tree_manual = ttk.Treeview(table_card2, show='headings', height=10)
-        vsb2 = ttk.Scrollbar(table_card2, orient='vertical', command=self.mileage_tree_manual.yview)
-        self.mileage_tree_manual.configure(yscrollcommand=vsb2.set)
-        self.mileage_tree_manual.pack(side='left', fill='both', expand=True)
-        vsb2.pack(side='right', fill='y')
-        
-        self.mileage_tree_manual.insert('', 'end', values=('请点击生成按钮',))
-        
-        # 表格3：详细路段养护类型（自动养护触发）
-        table_card3 = ttk.LabelFrame(content_frame, text='各线路各路段年度养护类型明细 - 自动养护触发', padding=10)
-        table_card3.pack(fill='x', padx=10, pady=(0, 10))
-        
-        btn_frame3 = ttk.Frame(table_card3)
-        btn_frame3.pack(fill='x', pady=(0, 5))
-        tk.Button(btn_frame3, text='📥 导出Excel', command=self._export_mileage_segment_excel).pack(side='left', padx=5)
-        tk.Button(btn_frame3, text='📋 复制', command=self._copy_mileage_segment_to_clipboard).pack(side='left')
-        
-        self.mileage_segment_tree = ttk.Treeview(table_card3, show='headings', height=10)
-        vsb3 = ttk.Scrollbar(table_card3, orient='vertical', command=self.mileage_segment_tree.yview)
-        hsb3 = ttk.Scrollbar(table_card3, orient='horizontal', command=self.mileage_segment_tree.xview)
-        self.mileage_segment_tree.configure(yscrollcommand=vsb3.set, xscrollcommand=hsb3.set)
-        self.mileage_segment_tree.pack(side='left', fill='both', expand=True)
-        vsb3.pack(side='right', fill='y')
-        hsb3.pack(side='bottom', fill='x')
-        
-        self.mileage_segment_tree.insert('', 'end', values=('请点击生成按钮',))
+    def _reset_policy_config(self):
+        if not messagebox.askyesno('确认','确定恢复默认？'): return
+        for k,v in {
+            '路面改造_沥青路面_一级公路_PCI':80,'路面改造_沥青路面_一级公路_PQI':80,'路面改造_沥青路面_一级公路_RQI':80,
+            '路面改造_沥青路面_二级及以下_PCI':75,'路面改造_沥青路面_二级及以下_PQI':75,'路面改造_沥青路面_二级及以下_RQI':75,
+            '路面改造_水泥路面_一级公路_PCI':80,'路面改造_水泥路面_一级公路_PQI':80,'路面改造_水泥路面_一级公路_RQI':80,
+            '路面改造_水泥路面_二级及以下_PCI':75,'路面改造_水泥路面_二级及以下_PQI':75,'路面改造_水泥路面_二级及以下_RQI':75,
+            '预防性养护_沥青路面_一级公路_PCI低':80,'预防性养护_沥青路面_一级公路_PCI高':90,'预防性养护_沥青路面_一级公路_PQI':80,
+            '预防性养护_沥青路面_二级及以下_PCI低':78,'预防性养护_沥青路面_二级及以下_PCI高':85,'预防性养护_沥青路面_二级及以下_PQI':75,
+            '预防性养护_水泥路面_一级公路_PCI低':80,'预防性养护_水泥路面_一级公路_PCI高':90,'预防性养护_水泥路面_一级公路_PQI':80,
+            '预防性养护_水泥路面_二级及以下_PCI低':78,'预防性养护_水泥路面_二级及以下_PCI高':85,'预防性养护_水泥路面_二级及以下_PQI':75,
+        }.items():
+            if k in self.trigger_vars: self.trigger_vars[k].set(v)
+        for k,v in {
+            '路面改造_沥青路面_PQI':92,'路面改造_沥青路面_PCI':92,'路面改造_沥青路面_RQI':93,
+            '路面改造_水泥路面_PQI':88,'路面改造_水泥路面_PCI':88,'路面改造_水泥路面_RQI':90,
+            '预防性养护_沥青路面_PQI':89,'预防性养护_沥青路面_PCI':89,'预防性养护_沥青路面_RQI':91,
+            '预防性养护_水泥路面_PQI':86,'预防性养护_水泥路面_PCI':86,'预防性养护_水泥路面_RQI':88,
+        }.items():
+            if k in self.callback_vars: self.callback_vars[k].set(v)
+        for k,v in {
+            '路面改造_沥青路面':319,'路面改造_水泥路面':299,'预防性养护_沥青路面':160,'预防性养护_水泥路面':140,
+            '日常养护_沥青路面':30,'日常养护_水泥路面':25,
+        }.items():
+            if k in self.price_vars: self.price_vars[k].set(v)
+        self.status_var.set('已恢复默认配置')
 
-    # ── Tab 5: 养护资金 ──
-    def _build_fund_tab(self):
-        self.fund_frame = ttk.Frame(self.model_notebook)
-        self.model_notebook.add(self.fund_frame, text=' 养护资金 ')
-        
-        # 模式选择
-        mode_frame = ttk.Frame(self.fund_frame)
-        mode_frame.pack(fill='x', padx=10, pady=5)
-        ttk.Label(mode_frame, text='计算模式：', font=('Microsoft YaHei', 9, 'bold')).pack(side='left')
-        
-        self.fund_mode_var = tk.StringVar(value='auto')
-        ttk.Radiobutton(mode_frame, text='自动养护触发', variable=self.fund_mode_var, value='auto').pack(side='left', padx=10)
-        ttk.Radiobutton(mode_frame, text='手动养护规划', variable=self.fund_mode_var, value='manual').pack(side='left', padx=10)
-        
-        # 按钮框架
-        btn_frame = ttk.Frame(self.fund_frame)
-        btn_frame.pack(fill='x', padx=10, pady=10)
-        tk.Button(btn_frame, text='💰 生成养护资金表', command=self._generate_fund,
-                   bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9),
-                   padx=10, pady=3, cursor='hand2').pack(side='left')
-        
-        # 表格1：自动养护触发
-        table_card1 = ttk.LabelFrame(self.fund_frame, text='各线路5年养护资金（万元）- 自动养护触发', padding=10)
-        table_card1.pack(fill='both', expand=True, padx=10, pady=(0, 5))
-        
-        btn_frame1 = ttk.Frame(table_card1)
-        btn_frame1.pack(fill='x', pady=(0, 5))
-        tk.Button(btn_frame1, text='📥 导出Excel', command=lambda: self._export_fund_excel('auto')).pack(side='left', padx=5)
-        tk.Button(btn_frame1, text='📋 复制', command=lambda: self._copy_fund_to_clipboard('auto')).pack(side='left')
-        
-        self.fund_tree_auto = ttk.Treeview(table_card1, show='headings', height=10)
-        vsb = ttk.Scrollbar(table_card1, orient='vertical', command=self.fund_tree_auto.yview)
-        self.fund_tree_auto.configure(yscrollcommand=vsb.set)
-        self.fund_tree_auto.pack(side='left', fill='both', expand=True)
-        vsb.pack(side='right', fill='y')
-        
-        self.fund_tree_auto.insert('', 'end', values=('请点击生成按钮',))
-        
-        # 表格2：手动养护规划
-        table_card2 = ttk.LabelFrame(self.fund_frame, text='各线路5年养护资金（万元）- 手动养护规划', padding=10)
-        table_card2.pack(fill='both', expand=True, padx=10, pady=(0, 10))
-        
-        btn_frame2 = ttk.Frame(table_card2)
-        btn_frame2.pack(fill='x', pady=(0, 5))
-        tk.Button(btn_frame2, text='📥 导出Excel', command=lambda: self._export_fund_excel('manual')).pack(side='left', padx=5)
-        tk.Button(btn_frame2, text='📋 复制', command=lambda: self._copy_fund_to_clipboard('manual')).pack(side='left')
-        
-        self.fund_tree_manual = ttk.Treeview(table_card2, show='headings', height=10)
-        vsb = ttk.Scrollbar(table_card2, orient='vertical', command=self.fund_tree_manual.yview)
-        self.fund_tree_manual.configure(yscrollcommand=vsb.set)
-        self.fund_tree_manual.pack(side='left', fill='both', expand=True)
-        vsb.pack(side='right', fill='y')
-        
-        self.fund_tree_manual.insert('', 'end', values=('请点击生成按钮',))
+    # ══════════════════════════════════════════════════════════════════════════
+    #  页面6: 需求分析
+    # ══════════════════════════════════════════════════════════════════════════
+    def _build_page6(self, parent):
+        self._section_title(parent, '🔍 养护需求分析')
+        self._section_sub(parent, '基于预测模型和养护对策，分析路网养护需求并排序')
 
-    # ── Tab 6: 年度汇总 ──
-    def _build_yearly_summary_tab(self):
-        self.yearly_frame = ttk.Frame(self.model_notebook)
-        self.model_notebook.add(self.yearly_frame, text=' 年度汇总 ')
-        
-        # 模式选择
-        mode_frame = ttk.Frame(self.yearly_frame)
-        mode_frame.pack(fill='x', padx=10, pady=5)
-        ttk.Label(mode_frame, text='计算模式：', font=('Microsoft YaHei', 9, 'bold')).pack(side='left')
-        
-        self.yearly_mode_var = tk.StringVar(value='auto')
-        ttk.Radiobutton(mode_frame, text='自动养护触发', variable=self.yearly_mode_var, value='auto').pack(side='left', padx=10)
-        ttk.Radiobutton(mode_frame, text='手动养护规划', variable=self.yearly_mode_var, value='manual').pack(side='left', padx=10)
-        
-        # 按钮框架
-        btn_frame = ttk.Frame(self.yearly_frame)
-        btn_frame.pack(fill='x', padx=10, pady=10)
-        tk.Button(btn_frame, text='📋 生成年度汇总表', command=self._generate_yearly_summary,
-                   bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9),
-                   padx=10, pady=3, cursor='hand2').pack(side='left', padx=5)
-        
-        # 表格1：自动养护触发
-        table_card1 = ttk.LabelFrame(self.yearly_frame, text='每年路面改造与预防养护汇总 - 自动养护触发', padding=10)
-        table_card1.pack(fill='both', expand=True, padx=10, pady=(0, 5))
-        
-        btn_frame1 = ttk.Frame(table_card1)
-        btn_frame1.pack(fill='x', pady=(0, 5))
-        tk.Button(btn_frame1, text='📥 导出Excel', command=lambda: self._export_yearly_excel('auto')).pack(side='left', padx=5)
-        tk.Button(btn_frame1, text='📋 复制', command=lambda: self._copy_yearly_to_clipboard('auto')).pack(side='left')
-        
-        self.yearly_tree_auto = ttk.Treeview(table_card1, show='headings', height=8)
-        vsb = ttk.Scrollbar(table_card1, orient='vertical', command=self.yearly_tree_auto.yview)
-        self.yearly_tree_auto.configure(yscrollcommand=vsb.set)
-        self.yearly_tree_auto.pack(side='left', fill='both', expand=True)
-        vsb.pack(side='right', fill='y')
-        
-        self.yearly_tree_auto.insert('', 'end', values=('请点击生成按钮',))
-        
-        # 表格2：手动养护规划
-        table_card2 = ttk.LabelFrame(self.yearly_frame, text='每年路面改造与预防养护汇总 - 手动养护规划', padding=10)
-        table_card2.pack(fill='both', expand=True, padx=10, pady=(0, 10))
-        
-        btn_frame2 = ttk.Frame(table_card2)
-        btn_frame2.pack(fill='x', pady=(0, 5))
-        tk.Button(btn_frame2, text='📥 导出Excel', command=lambda: self._export_yearly_excel('manual')).pack(side='left', padx=5)
-        tk.Button(btn_frame2, text='📋 复制', command=lambda: self._copy_yearly_to_clipboard('manual')).pack(side='left')
-        
-        self.yearly_tree_manual = ttk.Treeview(table_card2, show='headings', height=8)
-        vsb = ttk.Scrollbar(table_card2, orient='vertical', command=self.yearly_tree_manual.yview)
-        self.yearly_tree_manual.configure(yscrollcommand=vsb.set)
-        self.yearly_tree_manual.pack(side='left', fill='both', expand=True)
-        vsb.pack(side='right', fill='y')
-        
-        self.yearly_tree_manual.insert('', 'end', values=('请点击生成按钮',))
+        card = self._card(parent, '分析参数')
+        r = self._row(card)
+        tk.Label(r, text='县份：', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left')
+        self.demand_county_var = tk.StringVar(value='全部')
+        self.demand_county_cb = ttk.Combobox(r, textvariable=self.demand_county_var, width=12, state='readonly', values=['全部'])
+        self.demand_county_cb.pack(side='left', padx=8)
+        tk.Label(r, text='目标年份：', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left', padx=(15,0))
+        self.demand_year_var = tk.StringVar(value='2026')
+        ttk.Combobox(r, textvariable=self.demand_year_var, values=[str(y) for y in range(2026,2031)], width=6).pack(side='left', padx=5)
+        tk.Button(r, text='▶ 执行需求分析', command=self._run_demand,
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 10), padx=12, cursor='hand2').pack(side='left', padx=15)
+        tk.Button(r, text='📋 优先排序', command=self._prioritize_demand,
+                 font=('Microsoft YaHei', 9), padx=8).pack(side='left', padx=5)
+        tk.Button(r, text='📥 导出', command=self._export_demand,
+                 font=('Microsoft YaHei', 9), padx=8).pack(side='right')
 
-    def _calculate_decay_rates(self):
-        """动态计算衰减率（支持按县计算）"""
-        if not self.data_cache:
-            messagebox.showwarning('提示', '请先在"数据配置"中加载数据')
-            return
-        
-        # 合并所有数据
-        all_df = self.data_cache.get('全部', pd.DataFrame())
-        if all_df.empty:
+        card2 = self._card(parent, '养护需求列表', 3, expand=True)
+        cols = ('路线编码','路段起点','路段终点','里程(km)','当前PQI','预测PQI','养护类型','触发条件','费用(万元)','优先级')
+        self.demand_tree = ttk.Treeview(card2, columns=cols, show='headings', height=12)
+        ws = {'路线编码':85,'路段起点':65,'路段终点':65,'里程(km)':60,'当前PQI':60,'预测PQI':60,'养护类型':80,'触发条件':180,'费用(万元)':75,'优先级':55}
+        for c in cols: self.demand_tree.heading(c, text=c); self.demand_tree.column(c, width=ws.get(c,70), anchor='center')
+        sv = ttk.Scrollbar(card2, orient='vertical', command=self.demand_tree.yview)
+        sh = ttk.Scrollbar(card2, orient='horizontal', command=self.demand_tree.xview)
+        self.demand_tree.configure(yscrollcommand=sv.set, xscrollcommand=sh.set)
+        self.demand_tree.pack(side='left', fill='both', expand=True)
+        sv.pack(side='right', fill='y'); sh.pack(side='bottom', fill='x')
+        self.demand_summary = tk.Label(parent, text='', bg=THEME['bg'], fg=THEME['text'], font=('Microsoft YaHei', 9))
+        self.demand_summary.pack(anchor='w', padx=20, pady=3)
+
+    def _run_demand(self):
+        df = self._get_data(self.demand_county_var.get())
+        if df.empty: return
+        if '年份' in df.columns: df = df[df['年份']==df['年份'].max()]
+        ty = int(self.demand_year_var.get())
+        try:
+            from src.decision.performance_models import calibrate_exponential_model
             all_df = pd.concat(self.data_cache.values(), ignore_index=True)
-        
-        if all_df.empty:
-            messagebox.showwarning('提示', '没有可分析的数据')
-            return
-        
-        # 检查必要列
-        required = ['路线编码', '路段起点', '路段终点', '年份', 'PQI', '路面类型', '技术等级']
-        missing = [c for c in required if c not in all_df.columns]
-        if missing:
-            messagebox.showwarning('提示', f'数据缺少必要列：{missing}')
-            return
-        
-        # 获取当前选择的县
-        county = self._get_current_county()
-        county_text = f"（{county}）" if county else "（全部）"
-        
-        self.calc_status_label.config(text='正在计算...', foreground=THEME['text_light'])
-        self.update()
-        
-        try:
-            from src.decay_calculator import calculate_decay_rates
-            
-            results = calculate_decay_rates(all_df, county)
-            
-            # 清空表格
-            for item in self.decay_tree.get_children():
-                self.decay_tree.delete(item)
-            
-            if results:
-                grade_order = {'一级公路': 1, '二级公路': 2, '三级公路': 3, '四级公路': 4}
-                sorted_keys = sorted(results.keys(), key=lambda x: (x[0], grade_order.get(x[1], 5)))
-                
-                total_samples = 0
-                for key in sorted_keys:
-                    vals = results[key]
-                    pqi_k = f"{vals['PQI']:.4f}" if vals['PQI'] else '-'
-                    pci_k = f"{vals['PCI']:.4f}" if vals['PCI'] else '-'
-                    rqi_k = f"{vals['RQI']:.4f}" if vals['RQI'] else '-'
-                    samples = vals['样本数']
-                    total_samples += samples
-                    
-                    self.decay_tree.insert('', 'end', values=(key[0], key[1], pqi_k, pci_k, rqi_k, str(samples)))
-                
-                self.calc_status_label.config(
-                    text=f'计算完成{county_text}，共{total_samples}个有效样本', 
-                    foreground=THEME['success']
-                )
-                
-                self._update_insights(results, county)
-                
-            else:
-                self.decay_tree.insert('', 'end', values=('', '', '样本不足，无法计算', '', '', ''))
-                self.calc_status_label.config(text='样本不足', foreground=THEME['warning'])
-                self.insight_text_var.set('样本不足，无法生成关键发现')
-                
+            dr = calibrate_exponential_model(all_df)
+            result = analyze_demand(df, target_year=ty, decay_rates=dr)
+            def cc(r):
+                ln = r.get('路段长度(km)',1); mt = r.get('养护类型','日常养护'); pt = r.get('路面类型','沥青路面')
+                pk = f'{mt}_{pt}'
+                pr = self.price_vars[pk].get() if hasattr(self,'price_vars') and pk in self.price_vars else {'路面改造_沥青路面':319,'预防性养护_沥青路面':160,'日常养护_沥青路面':30}.get(pk,300)
+                return round(ln*1000*7*pr/10000,2)
+            result['路段长度(km)'] = result.apply(lambda r: r.get('路段长度(km)',1), axis=1)
+            result['估算费用(万元)'] = result.apply(cc, axis=1)
+            result['养护类型'] = result['养护类型'].fillna('日常养护')
+            self.demand_result_df = result
+            self._refresh_demand_tree(result, ty)
+            self.demand_summary.config(text=f'总路段：{len(result)} | 路面改造：{len(result[result["养护类型"]=="路面改造"])} | 预防性养护：{len(result[result["养护类型"]=="预防性养护"])} | 日常养护：{len(result[result["养护类型"]=="日常养护"])}')
+            self.mark_step_done(6)
+            self.status_var.set(f'需求分析完成 — {len(result)}个需求')
         except Exception as e:
-            messagebox.showerror('错误', f'计算失败：{str(e)}')
-            import traceback
-            traceback.print_exc()
-            self.calc_status_label.config(text='计算失败', foreground=THEME['danger'])
-
-    def _generate_prediction(self):
-        """生成5年PQI预测表"""
-        if not self.data_cache:
-            messagebox.showwarning('提示', '请先加载数据')
-            return
-        
-        # 自动同步UI上的触发模型参数（无需用户手动点保存）
-        if hasattr(self, '_collect_trigger_config') and set_trigger_model:
-            try:
-                config = self._collect_trigger_config()
-                set_trigger_model(config)
-            except:
-                pass
-        
-        all_df = pd.concat(self.data_cache.values(), ignore_index=True)
-        if all_df.empty:
-            return
-        
-        county = self._get_current_county()
-        
-        try:
-            from src.decay_calculator import predict_5year_pqi, calculate_good_road_rate
-            
-            df_result = predict_5year_pqi(all_df, county)
-            
-            # 计算优良路率
-            good_road_df = calculate_good_road_rate(all_df, county)
-            
-            # 设置表格列
-            self.pred_tree.delete(*self.pred_tree.get_children())
-            self.pred_tree['columns'] = list(df_result.columns)
-            for col in df_result.columns:
-                self.pred_tree.heading(col, text=col)
-                # 计算列宽：中文字符宽度约10像素，英文约6像素
-                col_width = len(str(col)) * 8 + 10
-                for _, row in df_result.iterrows():
-                    cell_text = str(row.get(col, ''))
-                    cn_chars = sum(1 for c in cell_text if '\u4e00' <= c <= '\u9fff')
-                    en_chars = len(cell_text) - cn_chars
-                    cell_width = cn_chars * 10 + en_chars * 6 + 10
-                    col_width = max(col_width, cell_width)
-                # 限制最大宽度为100
-                col_width = min(col_width, 100)
-                self.pred_tree.column(col, width=col_width, minwidth=40, anchor='center', stretch=False)
-            
-            # 填充数据
-            for _, row in df_result.iterrows():
-                vals = [str(row.get(col, '')) for col in df_result.columns]
-                self.pred_tree.insert('', 'end', values=vals)
-            
-            # 显示优良路率
-            if not good_road_df.empty:
-                # 先删除已有的优良路率卡片（如果存在）
-                if hasattr(self, 'good_road_frame') and self.good_road_frame.winfo_exists():
-                    self.good_road_frame.destroy()
-                
-                # 创建优良路率显示卡片
-                self.good_road_frame = ttk.LabelFrame(self.pred_frame, text='PQI优良路率', padding=10)
-                self.good_road_frame.pack(fill='x', padx=10, pady=(10, 0))
-                
-                # 添加导出和复制按钮
-                btn_frame = ttk.Frame(self.good_road_frame)
-                btn_frame.pack(fill='x', pady=(0, 10))
-                tk.Button(btn_frame, text='📥 导出Excel', 
-                          command=lambda df=good_road_df: self._export_good_road_excel(df)).pack(side='left', padx=5)
-                tk.Button(btn_frame, text='📋 复制到剪贴板', 
-                          command=lambda df=good_road_df: self._copy_good_road_to_clipboard(df)).pack(side='left', padx=5)
-                
-                # 创建表格
-                good_road_tree = ttk.Treeview(self.good_road_frame, show='headings', height=6)
-                good_road_tree['columns'] = list(good_road_df.columns)
-                for col in good_road_df.columns:
-                    good_road_tree.heading(col, text=col)
-                    # 计算列宽：中文字符宽度约10像素，英文约6像素
-                    col_width = len(str(col)) * 8 + 10
-                    for _, row in good_road_df.iterrows():
-                        cell_text = str(row.get(col, ''))
-                        cn_chars = sum(1 for c in cell_text if '\u4e00' <= c <= '\u9fff')
-                        en_chars = len(cell_text) - cn_chars
-                        cell_width = cn_chars * 10 + en_chars * 6 + 10
-                        col_width = max(col_width, cell_width)
-                    # 限制最大宽度为100
-                    col_width = min(col_width, 100)
-                    good_road_tree.column(col, width=col_width, minwidth=40, anchor='center', stretch=False)
-                
-                # 填充数据
-                for _, row in good_road_df.iterrows():
-                    vals = [str(row.get(col, '')) for col in good_road_df.columns]
-                    good_road_tree.insert('', 'end', values=vals)
-                
-                # 添加滚动条
-                vsb = ttk.Scrollbar(self.good_road_frame, orient='vertical', command=good_road_tree.yview)
-                good_road_tree.configure(yscrollcommand=vsb.set)
-                good_road_tree.pack(side='left', fill='both', expand=True)
-                vsb.pack(side='right', fill='y')
-                
-        except Exception as e:
-            messagebox.showerror('错误', f'生成失败：{str(e)}')
-
-    def _generate_mileage(self):
-        """生成养护里程表（双模式）"""
-        if not self.data_cache:
-            messagebox.showwarning('提示', '请先加载数据')
-            return
-        
-        # 自动同步UI上的触发模型参数
-        if hasattr(self, '_collect_trigger_config') and set_trigger_model:
-            try:
-                config = self._collect_trigger_config()
-                set_trigger_model(config)
-            except:
-                pass
-        
-        all_df = pd.concat(self.data_cache.values(), ignore_index=True)
-        if all_df.empty:
-            return
-        
-        county = self._get_current_county()
-        
-        try:
-            from src.decay_calculator import calculate_maintenance_plan, calculate_maintenance_plan_with_manual
-            
-            # 获取手动养护规划
-            manual_plans = []
-            if hasattr(self, 'manual_plans'):
-                manual_plans = self.manual_plans
-            
-            # 生成自动养护触发表格
-            self._generate_mileage_table(self.mileage_tree_auto, all_df, county, mode='auto', manual_plans=[])
-            
-            # 生成手动养护规划表格
-            self._generate_mileage_table(self.mileage_tree_manual, all_df, county, mode='manual', manual_plans=manual_plans)
-            
-            # 生成详细路段养护类型表（自动养护触发）
-            self._generate_mileage_segment_table(all_df, county)
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'生成失败：{str(e)}')
-    
-    def _generate_mileage_table(self, tree, df, county, mode='auto', manual_plans=None):
-        """生成单个养护里程表格"""
-        from src.decay_calculator import calculate_maintenance_plan, calculate_maintenance_plan_with_manual
-        
-        if manual_plans is None:
-            manual_plans = []
-        
-        if mode == 'auto':
-            plan = calculate_maintenance_plan(df, county)
-        else:
-            plan = calculate_maintenance_plan_with_manual(df, county, manual_plans)
-        
-        cols = ['路线', '2026改造', '2026预防', '2027改造', '2027预防', '2028改造', '2028预防', 
-                '2029改造', '2029预防', '2030改造', '2030预防', '改造小计', '预防小计', '总计']
-        tree.delete(*tree.get_children())
-        tree['columns'] = cols
-        for col in cols:
-            tree.heading(col, text=col)
-            tree.column(col, width=70, anchor='center')
-        
-        total_renovate = {y: 0 for y in range(2026, 2031)}
-        total_prevent = {y: 0 for y in range(2026, 2031)}
-        
-        for route, data in plan.items():
-            row = [route]
-            route_renovate = 0
-            route_prevent = 0
-            for year in range(2026, 2031):
-                ren = data['里程'][year].get('路面改造', 0)
-                pre = data['里程'][year].get('预防性养护', 0)
-                row.append(f'{ren:.2f}' if ren else '-')
-                row.append(f'{pre:.2f}' if pre else '-')
-                route_renovate += ren
-                route_prevent += pre
-                total_renovate[year] += ren
-                total_prevent[year] += pre
-            
-            row.append(f'{route_renovate:.2f}')
-            row.append(f'{route_prevent:.2f}')
-            row.append(f'{route_renovate + route_prevent:.2f}')
-            tree.insert('', 'end', values=row)
-        
-        total_row = ['总计']
-        grand_renovate = 0
-        grand_prevent = 0
-        for year in range(2026, 2031):
-            total_row.append(f'{total_renovate[year]:.2f}')
-            total_row.append(f'{total_prevent[year]:.2f}')
-            grand_renovate += total_renovate[year]
-            grand_prevent += total_prevent[year]
-        total_row.append(f'{grand_renovate:.2f}')
-        total_row.append(f'{grand_prevent:.2f}')
-        total_row.append(f'{grand_renovate + grand_prevent:.2f}')
-        tree.insert('', 'end', values=total_row)
-
-    def _generate_mileage_segment_table(self, df, county):
-        """生成详细路段养护类型表"""
-        from src.decay_calculator import get_segment_maintenance_plan
-        
-        result_df = get_segment_maintenance_plan(df, county)
-        
-        cols = ['路线编码', '路段起点', '路段终点', '路段长度(km)', '路面类型', '技术等级', '年份', '养护类型']
-        self.mileage_segment_tree.delete(*self.mileage_segment_tree.get_children())
-        self.mileage_segment_tree['columns'] = cols
-        for col in cols:
-            self.mileage_segment_tree.heading(col, text=col)
-            if col == '路段长度(km)':
-                self.mileage_segment_tree.column(col, width=70, anchor='center')
-            elif col == '年份':
-                self.mileage_segment_tree.column(col, width=60, anchor='center')
-            else:
-                self.mileage_segment_tree.column(col, width=80, anchor='center')
-        
-        if result_df.empty:
-            self.mileage_segment_tree.insert('', 'end', values=('暂无数据',))
-            self.mileage_segment_df = pd.DataFrame()
-            return
-        
-        # 按路线编码和年份排序
-        result_df = result_df.sort_values(by=['路线编码', '年份', '路段起点'])
-        
-        for _, row in result_df.iterrows():
-            vals = [
-                str(row.get('路线编码', '')),
-                str(row.get('路段起点', '')),
-                str(row.get('路段终点', '')),
-                f"{row.get('路段长度(km)', 0):.3f}",
-                str(row.get('路面类型', '')),
-                str(row.get('技术等级', '')),
-                str(row.get('年份', '')),
-                str(row.get('养护类型', ''))
-            ]
-            self.mileage_segment_tree.insert('', 'end', values=vals)
-        
-        # 保存数据用于导出
-        self.mileage_segment_df = result_df
-
-    def _export_mileage_segment_excel(self):
-        """导出详细路段养护类型表到Excel"""
-        if not hasattr(self, 'mileage_segment_df') or self.mileage_segment_df.empty:
-            messagebox.showwarning('提示', '没有可导出的数据')
-            return
-        
-        file_path = filedialog.asksaveasfilename(
-            defaultextension='.xlsx',
-            filetypes=[('Excel文件', '*.xlsx'), ('CSV文件', '*.csv')]
-        )
-        if not file_path:
-            return
-        
-        try:
-            if file_path.endswith('.csv'):
-                self.mileage_segment_df.to_csv(file_path, index=False, encoding='utf-8-sig')
-            else:
-                self.mileage_segment_df.to_excel(file_path, index=False)
-            messagebox.showinfo('成功', '导出成功！')
-        except Exception as e:
-            messagebox.showerror('错误', f'导出失败：{str(e)}')
-
-    def _copy_mileage_segment_to_clipboard(self):
-        """复制详细路段养护类型表到剪贴板"""
-        if not hasattr(self, 'mileage_segment_df') or self.mileage_segment_df.empty:
-            messagebox.showwarning('提示', '没有可复制的数据')
-            return
-        
-        try:
-            self.mileage_segment_df.to_clipboard(index=False)
-            messagebox.showinfo('成功', '已复制到剪贴板！')
-        except Exception as e:
-            messagebox.showerror('错误', f'复制失败：{str(e)}')
-
-    def _generate_fund(self):
-        """生成养护资金表（双模式）"""
-        if not self.data_cache:
-            messagebox.showwarning('提示', '请先加载数据')
-            return
-        
-        all_df = pd.concat(self.data_cache.values(), ignore_index=True)
-        if all_df.empty:
-            return
-        
-        county = self._get_current_county()
-        
-        try:
-            from src.decay_calculator import calculate_maintenance_plan, calculate_maintenance_plan_with_manual
-            
-            manual_plans = []
-            if hasattr(self, 'manual_plans'):
-                manual_plans = self.manual_plans
-            
-            # 生成自动养护触发资金表
-            self._generate_fund_table(self.fund_tree_auto, all_df, county, mode='auto', manual_plans=[])
-            
-            # 生成手动养护规划资金表
-            self._generate_fund_table(self.fund_tree_manual, all_df, county, mode='manual', manual_plans=manual_plans)
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'生成失败：{str(e)}')
-    
-    def _generate_fund_table(self, tree, df, county, mode='auto', manual_plans=None):
-        """生成单个养护资金表格"""
-        from src.decay_calculator import calculate_maintenance_plan, calculate_maintenance_plan_with_manual
-        
-        if manual_plans is None:
-            manual_plans = []
-        
-        if mode == 'auto':
-            plan = calculate_maintenance_plan(df, county)
-        else:
-            plan = calculate_maintenance_plan_with_manual(df, county, manual_plans)
-        
-        cols = ['路线', '2026改造', '2026预防', '2027改造', '2027预防', '2028改造', '2028预防', 
-                '2029改造', '2029预防', '2030改造', '2030预防', '改造小计', '预防小计', '总计(万元)']
-        tree.delete(*tree.get_children())
-        tree['columns'] = cols
-        for col in cols:
-            tree.heading(col, text=col)
-            tree.column(col, width=70, anchor='center')
-        
-        total_renovate = {y: 0 for y in range(2026, 2031)}
-        total_prevent = {y: 0 for y in range(2026, 2031)}
-        
-        for route, data in plan.items():
-            row = [route]
-            route_renovate = 0
-            route_prevent = 0
-            for year in range(2026, 2031):
-                ren = data['资金'][year].get('路面改造', 0)
-                pre = data['资金'][year].get('预防性养护', 0)
-                row.append(f'{ren/10000:.2f}' if ren else '-')
-                row.append(f'{pre/10000:.2f}' if pre else '-')
-                route_renovate += ren
-                route_prevent += pre
-                total_renovate[year] += ren
-                total_prevent[year] += pre
-            
-            row.append(f'{route_renovate/10000:.2f}')
-            row.append(f'{route_prevent/10000:.2f}')
-            row.append(f'{(route_renovate + route_prevent)/10000:.2f}')
-            tree.insert('', 'end', values=row)
-        
-        total_row = ['总计']
-        grand_renovate = 0
-        grand_prevent = 0
-        for year in range(2026, 2031):
-            total_row.append(f'{total_renovate[year]/10000:.2f}')
-            total_row.append(f'{total_prevent[year]/10000:.2f}')
-            grand_renovate += total_renovate[year]
-            grand_prevent += total_prevent[year]
-        total_row.append(f'{grand_renovate/10000:.2f}')
-        total_row.append(f'{grand_prevent/10000:.2f}')
-        total_row.append(f'{(grand_renovate + grand_prevent)/10000:.2f}')
-        tree.insert('', 'end', values=total_row)
-
-    def _generate_yearly_summary(self):
-        """生成年度汇总表（双模式）"""
-        if not self.data_cache:
-            messagebox.showwarning('提示', '请先加载数据')
-            return
-        
-        all_df = pd.concat(self.data_cache.values(), ignore_index=True)
-        if all_df.empty:
-            return
-        
-        county = self._get_current_county()
-        
-        try:
-            from src.decay_calculator import get_yearly_summary, get_yearly_summary_with_manual
-            
-            manual_plans = []
-            if hasattr(self, 'manual_plans'):
-                manual_plans = self.manual_plans
-            
-            # 生成自动养护触发年度汇总表
-            df_auto = get_yearly_summary(all_df, county)
-            self._generate_yearly_summary_table(self.yearly_tree_auto, df_auto)
-            
-            # 生成手动养护规划年度汇总表
-            df_manual = get_yearly_summary_with_manual(all_df, county, manual_plans)
-            self._generate_yearly_summary_table(self.yearly_tree_manual, df_manual)
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'生成失败：{str(e)}')
-    
-    def _generate_yearly_summary_table(self, tree, df_result):
-        """生成单个年度汇总表格"""
-        tree.delete(*tree.get_children())
-        tree['columns'] = list(df_result.columns)
-        for col in df_result.columns:
-            tree.heading(col, text=col)
-            tree.column(col, width=120, anchor='center')
-        
-        for _, row in df_result.iterrows():
-            vals = [str(row.get(col, '')) for col in df_result.columns]
-            tree.insert('', 'end', values=vals)
-
-    def _update_insights(self, results: dict, county: str = None):
-        """根据计算结果更新关键发现"""
-        insights = []
-        county_text = f"（{county}县）" if county else "（全部县）"
-        
-        # 统计
-        pqi_rates = [v['PQI'] for v in results.values() if v['PQI']]
-        if pqi_rates:
-            avg_pqi_k = sum(pqi_rates) / len(pqi_rates)
-            insights.append(f'• {county_text}平均PQI年衰减系数：{avg_pqi_k:.4f}')
-        
-        # 找最大和最小
-        if pqi_rates:
-            max_k = max(pqi_rates)
-            min_k = min(pqi_rates)
-            for key, v in results.items():
-                if v['PQI'] == max_k:
-                    insights.append(f'• PQI衰减最快：{key[0]}{key[1]} (k={max_k:.4f})')
-                if v['PQI'] == min_k:
-                    insights.append(f'• PQI衰减最慢：{key[0]}{key[1]} (k={min_k:.4f})')
-        
-        # PCI vs RQI 对比
-        pci_rates = [v['PCI'] for v in results.values() if v['PCI']]
-        rqi_rates = [v['RQI'] for v in results.values() if v['RQI']]
-        if pci_rates and rqi_rates:
-            avg_pci = sum(pci_rates) / len(pci_rates)
-            avg_rqi = sum(rqi_rates) / len(rqi_rates)
-            if avg_pci > avg_rqi * 2:
-                insights.append(f'• PCI衰减显著快于RQI（破损快于平整度下降）')
-        
-        if insights:
-            self.insight_text_var.set('\n'.join(insights))
-        else:
-            self.insight_text_var.set('数据不足以生成关键发现')
-
-    # ════════════════════════════════════════
-    # Tab 3: 分析图表
-    # ════════════════════════════════════════
-    def _build_analysis_tab(self, parent):
-        frame = ttk.Frame(parent)
-        frame.pack(fill='both', expand=True, padx=20, pady=20)
-        
-        ttk.Label(frame, text='数据分析与图表生成', style='Title.TLabel').pack(anchor='w')
-        ttk.Label(frame, text='选择分析对象和图表类型，点击生成按钮', style='Subtitle.TLabel').pack(anchor='w', pady=(0, 10))
-        
-        opt_card = ttk.LabelFrame(frame, text='分析选项', padding=10)
-        opt_card.pack(fill='x', pady=5)
-        
-        row = ttk.Frame(opt_card)
-        row.pack(fill='x', pady=3)
-        ttk.Label(row, text='分析县份：').pack(side='left')
-        self.analysis_county_var = tk.StringVar(value='全部')
-        self.analysis_county_cb = ttk.Combobox(row, textvariable=self.analysis_county_var,
-                                                width=12, state='readonly')
-        self.analysis_county_cb['values'] = ['全部']   # 加载数据后自动更新
-        self.analysis_county_cb.pack(side='left', padx=(0, 20))
-        
-        ttk.Label(row, text='图表输出目录：').pack(side='left')
-        self.chart_dir_var = tk.StringVar()
-        ttk.Entry(row, textvariable=self.chart_dir_var, width=35).pack(side='left', padx=5)
-        ttk.Button(row, text='浏览', command=self._browse_chart_dir, width=8).pack(side='left', padx=5)
-        
-        # 图表类型选择
-        chart_card = ttk.LabelFrame(frame, text='图表类型', padding=10)
-        chart_card.pack(fill='x', pady=10)
-        
-        self.chart_vars = {}
-        chart_types = [
-            '养护需求预测', '5年养护预测', 'PQI趋势折线图', '路线养护汇总',
-            'PQI等级分布', '历年等级堆叠', '路面类型饼图', '技术等级分布',
-            '多县横向柱状'
-        ]
-        
-        for i, ctype in enumerate(chart_types):
-            var = tk.BooleanVar(value=True)
-            self.chart_vars[ctype] = var
-            cb = ttk.Checkbutton(chart_card, text=ctype, variable=var)
-            cb.grid(row=i//3, column=i%3, sticky='w', padx=10, pady=3)
-        
-        # 生成按钮
-        btn_frame = ttk.Frame(frame)
-        btn_frame.pack(fill='x', pady=10)
-        
-        ttk.Button(btn_frame, text='生成图表', command=self._generate_charts,
-                  style='Primary.TButton').pack(side='left')
-        
-        # 日志输出
-        log_card = ttk.LabelFrame(frame, text='生成日志', padding=5)
-        log_card.pack(fill='both', expand=True, pady=(10, 0))
-        
-        self.analysis_log = tk.Text(log_card, height=12, font=('Consolas', 9))
-        self.analysis_log.pack(fill='both', expand=True)
-        
-    def _browse_chart_dir(self):
-        path = filedialog.askdirectory(title='选择图表输出目录')
-        if path:
-            self.chart_dir_var.set(path)
-
-    def _generate_charts(self):
-        if not self.data_cache:
-            messagebox.showwarning('提示', '请先加载数据')
-            return
-
-        chart_dir = self.chart_dir_var.get().strip()
-        if not chart_dir:
-            chart_dir = os.path.join(BASE_DIR, 'output')
-        
-        os.makedirs(chart_dir, exist_ok=True)
-
-        county = self.analysis_county_var.get()
-        
-        # 传递完整的数据字典给generate_all_charts
-        self.analysis_log.delete('1.0', 'end')
-        self.analysis_log.insert('end', f'正在生成图表...\n')
-        self.update()
-
-        try:
-            results = generate_all_charts(self.data_cache, chart_dir, county if county != '全部' else None)
-            
-            count = 0
-            for county_name, charts in results.items():
-                for chart_name, chart_path in charts.items():
-                    self.analysis_log.insert('end', f'{county_name}-{chart_name}: {chart_path}\n')
-                    count += 1
-            
-            self.analysis_log.insert('end', f'\n共生成 {count} 个图表\n')
-            messagebox.showinfo('完成', f'图表已保存到：{chart_dir}')
-            
-        except Exception as e:
-            self.analysis_log.insert('end', f'错误：{str(e)}\n')
             messagebox.showerror('错误', str(e))
 
-    # ════════════════════════════════════════
-    # Tab 4: AI报告配置
-    # ════════════════════════════════════════
-    def _build_llm_tab(self, parent):
-        print("DEBUG: _build_llm_tab 开始执行")
-        frame = ttk.Frame(parent)
-        frame.pack(fill='both', expand=True, padx=20, pady=20)
-        print(f"DEBUG: frame 创建成功: {frame}")
-        
-        ttk.Label(frame, text='AI大模型配置', style='Title.TLabel').pack(anchor='w')
-        ttk.Label(frame, text='配置大模型API以生成智能报告', style='Subtitle.TLabel').pack(anchor='w', pady=(0, 15))
+    def _prioritize_demand(self):
+        if self.demand_result_df is None or self.demand_result_df.empty: return
+        from src.decision.maintenance_demand import prioritize_demand
+        self.demand_result_df = prioritize_demand(self.demand_result_df)
+        self._refresh_demand_tree(self.demand_result_df, int(self.demand_year_var.get()))
+        self.status_var.set('需求已按优先级排序')
 
-        # API配置
-        print("DEBUG: 创建 api_card")
-        api_card = ttk.LabelFrame(frame, text='API配置', padding=15)
-        api_card.pack(fill='x')
-        print(f"DEBUG: api_card 创建成功: {api_card}")
+    def _refresh_demand_tree(self, result, ty):
+        self.demand_tree.delete(*self.demand_tree.get_children())
+        for _, row in result.iterrows():
+            self.demand_tree.insert('','end',values=(
+                row.get('路线编码',''), row.get('路段起点',''), row.get('路段终点',''),
+                f"{row.get('路段长度(km)',1):.2f}", f"{row.get('当前PQI',0):.1f}",
+                f"{row.get(f'{ty}年预测PQI',0):.1f}", row.get('养护类型',''),
+                row.get('触发原因',''), f"{row.get('估算费用(万元)',0):.2f}",
+                f"{row.get('优先级评分',0):.1f}"))
 
-        fields = [
-            ('API Key：', 'llm_key', '', True),
-            ('接口地址(Base URL)：', 'llm_url', 'https://dashscope.aliyuncs.com/compatible-mode/v1', False),
-            ('模型名称：', 'llm_model', 'qwen-plus', False),
-        ]
+    def _export_demand(self):
+        if self.demand_result_df is None or self.demand_result_df.empty:
+            messagebox.showwarning('提示','请先执行需求分析'); return
+        path = filedialog.asksaveasfilename(title='导出', defaultextension='.xlsx', filetypes=[('Excel','*.xlsx')])
+        if path: self.demand_result_df.to_excel(path, index=False); messagebox.showinfo('成功','已导出')
 
-        for label, key, default, is_pwd in fields:
-            row = ttk.Frame(api_card)
-            row.pack(fill='x', pady=5)
-            
-            tk.Label(row, text=label, width=18).pack(side='left')
-            
-            var = tk.StringVar(value=default)
-            self.llm_vars[key] = var
-            
-            if is_pwd:
-                self.llm_key_entry = ttk.Entry(row, textvariable=var, width=50, show='*')
-                self.llm_key_entry.pack(side='left')
-            else:
-                ttk.Entry(row, textvariable=var, width=50).pack(side='left')
-            
-            if key == 'llm_key':
-                self.llm_key_toggle_btn = tk.Button(
-                    row,
-                    text='显示',
-                    width=4,
-                    command=self._toggle_pwd,
-                    bg=THEME['accent'],
-                    fg='white',
-                    font=('Microsoft YaHei', 8)
-                )
-                self.llm_key_toggle_btn.pack(side='left', padx=5)
+    # ══════════════════════════════════════════════════════════════════════════
+    #  页面7: 预算资金
+    # ══════════════════════════════════════════════════════════════════════════
+    def _build_page7(self, parent):
+        self._section_title(parent, '💰 养护预算与资金优化分配')
+        self._section_sub(parent, '预算约束下的养护资金优化分配')
 
-        # 加载已有配置
-        llm_cfg = self.config.get('llm', {})
-        if 'llm_key' in self.llm_vars:
-            self.llm_vars['llm_key'].set(llm_cfg.get('api_key', ''))
-            self.llm_vars['llm_url'].set(llm_cfg.get('base_url', 'https://dashscope.aliyuncs.com/compatible-mode/v1'))
-            self.llm_vars['llm_model'].set(llm_cfg.get('model', 'qwen-plus'))
+        card = self._card(parent, '预算配置')
+        r = self._row(card)
+        tk.Label(r, text='年度预算(万元)：', bg=THEME['card'], font=('Microsoft YaHei', 10)).pack(side='left')
+        self.budget_var = tk.StringVar(value='5000')
+        ttk.Entry(r, textvariable=self.budget_var, width=10, font=('Microsoft YaHei', 10)).pack(side='left', padx=8)
+        tk.Label(r, text='分配方法：', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left', padx=(15,0))
+        self.alloc_method_var = tk.StringVar(value='优先序法')
+        ttk.Combobox(r, textvariable=self.alloc_method_var, width=12, values=['优先序法','增量分析法','多目标优化']).pack(side='left', padx=8)
+        tk.Button(r, text='▶ 执行资金分配', command=self._run_budget,
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 10), padx=12, cursor='hand2').pack(side='left', padx=15)
+        tk.Button(r, text='📥 导出', command=self._export_budget, font=('Microsoft YaHei', 9)).pack(side='left', padx=5)
 
-        # 测试按钮和结果显示
-        btn_frame = ttk.Frame(frame)
-        btn_frame.pack(fill='x', pady=15)
-        
-        tk.Button(btn_frame, text='🔗 测试连接', command=self._test_llm,
-                   bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9),
-                   padx=10, pady=3, cursor='hand2', width=12).pack(side='left')
-        tk.Button(btn_frame, text='💾 保存配置', command=self._save_llm_config,
-                   bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9),
-                   padx=10, pady=3, cursor='hand2', width=12).pack(side='left', padx=10)
-        
-        # 测试结果显示（设置背景色与主题一致）
-        self.llm_test_label = tk.Label(btn_frame, text='', font=('Microsoft YaHei', 9),
-                                        bg=THEME['bg'])
-        self.llm_test_label.pack(side='left', padx=20)
+        card2 = self._card(parent, '资金分配方案', expand=True)
+        cols = ('养护类型','项目数','需求资金(万元)','分配资金(万元)','满足率(%)')
+        self.budget_tree = ttk.Treeview(card2, columns=cols, show='headings', height=5)
+        for c in cols: self.budget_tree.heading(c, text=c); self.budget_tree.column(c, width=130, anchor='center')
+        self.budget_tree.pack(fill='both', expand=True)
+        self.budget_info = tk.Label(parent, text='', bg=THEME['bg'], fg=THEME['text_light'], font=('Microsoft YaHei', 9))
+        self.budget_info.pack(anchor='w', padx=20)
+        self.budget_result = None
 
-        # 报告设置
-        title_card = ttk.LabelFrame(frame, text='报告设置', padding=15)
-        title_card.pack(fill='x', pady=(15, 0))
+    def _run_budget(self):
+        if self.demand_result_df is None or self.demand_result_df.empty:
+            messagebox.showwarning('提示','请先在"需求分析"中执行分析'); return
+        try:
+            from src.decision.budget_allocation import priority_allocation_by_type
+            budget = float(self.budget_var.get())
+            result = priority_allocation_by_type(self.demand_result_df, budget)
+            self.budget_result = result
+            self.budget_tree.delete(*self.budget_tree.get_children())
+            for mt in ['路面改造','预防性养护','日常养护','总计']:
+                if mt in result:
+                    r = result[mt]
+                    self.budget_tree.insert('','end',values=(mt,'-',f"{r.get('需求金额(万元)',0):.2f}",f"{r.get('分配预算(万元)',0):.2f}",f"{r.get('满足程度(%)',0):.1f}%"))
+            self.budget_info.config(text=f'方法：{self.alloc_method_var.get()} | 预算：{budget}万元')
+            self.mark_step_done(7); self.status_var.set('资金分配完成')
+        except Exception as e:
+            messagebox.showerror('错误', str(e))
 
-        tk.Label(title_card, text='报告标题：').pack(anchor='w')
-        self.report_title_var = tk.StringVar(value='公路养护需求分析报告')
-        ttk.Entry(title_card, textvariable=self.report_title_var, width=50).pack(anchor='w', pady=5)
+    def _export_budget(self):
+        self._export_tree(self.budget_tree)
 
-        tk.Label(title_card, text='报告摘要（AI参考）：').pack(anchor='w', pady=(10, 0))
-        self.report_summary_text = tk.Text(title_card, height=10, width=70)
-        self.report_summary_text.pack(anchor='w', pady=5)
-        
-        # 自动填充摘要按钮（放在报告设置框内）
-        tk.Button(title_card, text='📝 摘要自动生成（基于已分析数据）', 
-                   command=self._auto_fill_summary,
-                   bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9),
-                   padx=10, pady=3, cursor='hand2', width=25).pack(anchor='w', pady=5)
+    # ══════════════════════════════════════════════════════════════════════════
+    #  页面8: 项目库
+    # ══════════════════════════════════════════════════════════════════════════
+    def _build_page8(self, parent):
+        self._section_title(parent, '📋 养护工程项目库')
+        self._section_sub(parent, '中长期养护规划：养护工程项目库管理')
 
-    def _toggle_pwd(self):
-        """切换 API Key 的显示/隐藏状态"""
-        if not self.llm_key_entry:
-            return
+        card = self._card(parent)
+        r = self._row(card)
+        tk.Button(r, text='📥 从需求导入', command=self._pool_import_demand,
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9), padx=10, cursor='hand2').pack(side='left', padx=3)
+        tk.Button(r, text='📤 导出', command=self._pool_export, font=('Microsoft YaHei', 9), padx=8).pack(side='left', padx=3)
+        tk.Button(r, text='📥 导入', command=self._pool_import, font=('Microsoft YaHei', 9), padx=8).pack(side='left', padx=3)
+        tk.Button(r, text='🗑️ 清空', command=self._pool_clear, font=('Microsoft YaHei', 9), padx=8).pack(side='left', padx=3)
+        tk.Button(r, text='📋 年度计划', command=self._pool_gen_plan, font=('Microsoft YaHei', 9), padx=8).pack(side='left', padx=3)
 
-        self._llm_key_visible = not self._llm_key_visible
-        self.llm_key_entry.configure(show='' if self._llm_key_visible else '*')
-        if self.llm_key_toggle_btn:
-            self.llm_key_toggle_btn.configure(text='隐藏' if self._llm_key_visible else '显示')
+        card2 = self._card(parent, '项目列表', 3, expand=True)
+        cols = ('项目编号','路线编码','养护类型','计划年度','里程(km)','估算费用(万元)','优先级','状态')
+        self.pool_tree = ttk.Treeview(card2, columns=cols, show='headings', height=15)
+        ws = {'项目编号':140,'路线编码':85,'养护类型':80,'计划年度':65,'里程(km)':65,'估算费用(万元)':90,'优先级':55,'状态':60}
+        for c in cols: self.pool_tree.heading(c, text=c); self.pool_tree.column(c, width=ws.get(c,65), anchor='center')
+        sv = ttk.Scrollbar(card2, orient='vertical', command=self.pool_tree.yview)
+        self.pool_tree.configure(yscrollcommand=sv.set)
+        self.pool_tree.pack(side='left', fill='both', expand=True)
+        sv.pack(side='right', fill='y')
 
-    def _get_all_data_df(self):
-        """获取去重后的全量数据，避免把“全部”与各县数据重复拼接。"""
+    def _pool_refresh(self):
+        self.pool_tree.delete(*self.pool_tree.get_children())
+        if self.project_pool:
+            for p in self.project_pool.projects:
+                self.pool_tree.insert('','end',values=(p.project_id, p.route_code, p.maintenance_type or '',
+                    p.maintenance_year or '', f'{p.length:.2f}' if p.length else '',
+                    f'{p.estimated_cost:.2f}' if p.estimated_cost else '',
+                    f'{p.priority_score:.1f}' if p.priority_score else '', p.status or ''))
+
+    def _pool_import_demand(self):
+        if self.demand_result_df is None or self.demand_result_df.empty:
+            messagebox.showwarning('提示','请先执行需求分析'); return
+        if MaintenanceProject and self.project_pool:
+            for _, row in self.demand_result_df.iterrows():
+                ln = row.get('路段长度(km)',1)
+                p = MaintenanceProject(route_code=row.get('路线编码',''),
+                    segment_start=str(row.get('路段起点','')), segment_end=str(row.get('路段终点','')),
+                    length=ln, pavement_type=row.get('路面类型',''),
+                    current_condition={'PQI':row.get('当前PQI',80)},
+                    maintenance_type=row.get('养护类型',''),
+                    maintenance_year=int(self.demand_year_var.get()),
+                    estimated_cost=row.get('估算费用(万元)',ln*1000*7*300/10000),
+                    priority_score=row.get('优先级评分',0))
+                self.project_pool.add_project(p)
+            self._pool_refresh()
+            self.mark_step_done(8); self.status_var.set(f'已导入{len(self.demand_result_df)}个项目')
+
+    def _pool_export(self):
+        if not self.project_pool or not self.project_pool.projects: return
+        path = filedialog.asksaveasfilename(title='导出', defaultextension='.xlsx', filetypes=[('Excel','*.xlsx')], initialfile='养护工程项目库.xlsx')
+        if path: self.project_pool.to_excel(path); messagebox.showinfo('成功','已导出')
+
+    def _pool_import(self):
+        path = filedialog.askopenfilename(title='导入', filetypes=[('Excel','*.xlsx')])
+        if path and self.project_pool:
+            self.project_pool.from_excel(path); self._pool_refresh()
+
+    def _pool_clear(self):
+        if messagebox.askyesno('确认','清空项目库？'):
+            if self.project_pool: self.project_pool.projects.clear()
+            self._pool_refresh()
+
+    def _pool_gen_plan(self):
+        from src.decision.project_pool import generate_annual_plan
+        if not self.project_pool or not self.project_pool.projects:
+            messagebox.showwarning('提示','项目库为空'); return
+        plan = generate_annual_plan(self.project_pool, 2026, float(self.budget_var.get()))
+        self._pool_refresh()
+        messagebox.showinfo('完成', f"年度计划：{plan.get('项目数',0)}个项目 | 总费用：{plan.get('总费用(万元)',0)}万元")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  页面9: 效益评估
+    # ══════════════════════════════════════════════════════════════════════════
+    def _build_page9(self, parent):
+        self._section_title(parent, '✅ 综合效益评估（技术+经济双维度）')
+        self._section_sub(parent, '技术达标度 + 经济效益度 → 综合评分 → 不满足则调整后重新分析')
+
+        card = self._card(parent)
+        r = self._row(card)
+        tk.Button(r, text='▶ 执行综合评估', command=self._run_benefit,
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 10), padx=15, cursor='hand2').pack(side='left')
+        tk.Button(r, text='📥 导出报告', command=self._export_benefit, font=('Microsoft YaHei', 9)).pack(side='left', padx=10)
+        tk.Button(r, text='⚠ 不满足？调整后重算', command=self._feedback_adjust,
+                 bg=THEME['warning'], fg='white', font=('Microsoft YaHei', 10), padx=10, cursor='hand2').pack(side='left', padx=10)
+
+        # 技术达标评估表
+        card2 = self._card(parent, '技术达标评估', expand=True)
+        cols = ('道路类型','指标','当前值','短期目标','中期目标','长期目标','达成')
+        self.benefit_tech_tree = ttk.Treeview(card2, columns=cols, show='headings', height=5)
+        for c in cols: self.benefit_tech_tree.heading(c, text=c); self.benefit_tech_tree.column(c, width=105, anchor='center')
+        self.benefit_tech_tree.pack(fill='both', expand=True)
+
+        # 经济效益评估表
+        card3 = self._card(parent, '经济效益评估', expand=True)
+        cols2 = ('道路类型','指标','当前值','目标值','达成')
+        self.benefit_econ_tree = ttk.Treeview(card3, columns=cols2, show='headings', height=5)
+        for c in cols2: self.benefit_econ_tree.heading(c, text=c); self.benefit_econ_tree.column(c, width=110, anchor='center')
+        self.benefit_econ_tree.pack(fill='both', expand=True)
+
+        # 综合评分
+        card4 = self._card(parent, '综合评分')
+        self.benefit_text = tk.Text(card4, height=6, wrap='word', font=('Consolas', 10))
+        self.benefit_text.pack(fill='both', expand=True)
+
+    def _run_benefit(self):
         if not self.data_cache:
-            return pd.DataFrame()
-
-        all_df = self.data_cache.get('全部')
-        if all_df is not None and not all_df.empty:
-            return all_df.copy()
-
-        frames = [
-            df for county, df in self.data_cache.items()
-            if county != '全部' and df is not None and not df.empty
-        ]
-        if not frames:
-            return pd.DataFrame()
-        return pd.concat(frames, ignore_index=True)
-
-    def _get_summary_source(self):
-        """优先使用当前分析县份，其次使用报告县份，最后回退到全部数据。"""
-        county = None
-
-        if hasattr(self, 'model_county_var'):
-            model_county = self.model_county_var.get().strip()
-            if model_county and model_county != '全部':
-                county = model_county
-
-        if county is None and hasattr(self, 'report_county_var'):
-            report_county = self.report_county_var.get().strip()
-            if report_county and report_county != '全部':
-                county = report_county
-
-        if county and county in self.data_cache:
-            df = self.data_cache[county].copy()
-            county_label = county
-        else:
-            df = self._get_all_data_df()
-            county_label = '全部'
-
-        return county_label, df
-
-    def _test_llm(self):
-        api_key = self.llm_vars.get('llm_key', tk.StringVar()).get()
-        base_url = self.llm_vars.get('llm_url', tk.StringVar()).get()
-        model = self.llm_vars.get('llm_model', tk.StringVar()).get()
-
-        if not api_key:
-            self.llm_test_label.config(text='请输入API Key', foreground=THEME['danger'])
-            return
-
-        self.llm_test_label.config(text='正在测试...', foreground=THEME['text_light'])
-        self.update()
-
+            messagebox.showwarning('提示','请先加载数据'); return
         try:
-            import openai
-            # 检查openai版本，1.0+使用OpenAI类
-            if hasattr(openai, 'OpenAI'):
-                client = openai.OpenAI(api_key=api_key, base_url=base_url)
-            else:
-                # 旧版本兼容
-                openai.api_key = api_key
-                openai.api_base = base_url
-                client = openai
-            
-            response = client.chat.completions.create(
-                model=model,
-                messages=[{'role': 'user', 'content': '你好'}],
-                max_tokens=20
-            )
-            
-            self.llm_test_label.config(text='连接成功！', foreground=THEME['success'])
-            
-        except Exception as e:
-            self.llm_test_label.config(text=f'连接失败：{str(e)}', foreground=THEME['danger'])
+            df_all = pd.concat(self.data_cache.values(), ignore_index=True)
+            if '年份' in df_all.columns: df_all = df_all[df_all['年份']==df_all['年份'].max()]
+            def rt(r):
+                s = str(r); return '国道' if s.startswith('G') else ('省道' if s.startswith('S') else '其他')
+            if '路线编码' in df_all.columns: df_all['道路类型'] = df_all['路线编码'].apply(rt)
+            if '路段长度km' not in df_all.columns: df_all['路段长度km'] = 1.0
 
-    def _auto_fill_summary(self):
-        """根据当前加载的数据自动填充报告摘要"""
+            from src.decision.cost_model import calc_weighted_pqi, calc_good_road_rate, calc_bcr_ratio, calc_km_cost, calc_comprehensive_score
+
+            # 技术达标表
+            self.benefit_tech_tree.delete(*self.benefit_tech_tree.get_children())
+            tech_scores = {}
+            for road in ['国道','省道']:
+                rd = df_all[df_all['道路类型']==road]
+                if rd.empty: continue
+                t = rd['路段长度km'].sum()
+                w_pqi = calc_weighted_pqi(rd)
+                gr = calc_good_road_rate(rd)
+                metrics = [('加权PQI', w_pqi, 'PQI'), ('优良路率(%)', gr, '优良路率')]
+                road_score = 0; cnt = 0
+                for metric, cur, suffix in metrics:
+                    mid_t = self.target_vars.get(f'mid_{road}_{suffix}', tk.IntVar(value=0)).get() if hasattr(self,'target_vars') else 80
+                    ok = '✓' if cur >= mid_t else '✗'
+                    if ok == '✓': cnt += 1
+                    self.benefit_tech_tree.insert('','end',values=(road,metric,f'{cur:.1f}',
+                        f'{self.target_vars.get(f"short_{road}_{suffix}",tk.IntVar(value=0)).get() if hasattr(self,"target_vars") else "-"}',
+                        f'{mid_t}',
+                        f'{self.target_vars.get(f"long_{road}_{suffix}",tk.IntVar(value=0)).get() if hasattr(self,"target_vars") else "-"}',
+                        ok))
+                tech_scores[road] = (cnt / len(metrics) * 100) if metrics else 0
+
+            # 经济效益表
+            self.benefit_econ_tree.delete(*self.benefit_econ_tree.get_children())
+            econ_scores = {}
+            for road in ['国道','省道']:
+                rd = df_all[df_all['道路类型']==road]
+                if rd.empty: continue
+                t = rd['路段长度km'].sum(); w = rd['路面宽度'].mean() if '路面宽度' in rd.columns else 7
+                est_cost = t * 1000 * w * 300 / 10000
+                bcr = calc_bcr_ratio(rd, est_cost)
+                kmc = calc_km_cost(est_cost, rd)
+                mid_bcr = self.target_vars.get(f'mid_{road}_BCR', tk.IntVar(value=150)).get()/100 if hasattr(self,'target_vars') else 1.5
+                mid_kmc = self.target_vars.get(f'mid_{road}_km成本', tk.IntVar(value=50)).get() if hasattr(self,'target_vars') else 50
+                metrics2 = [('B/C比', bcr, mid_bcr, 'higher'), ('每km成本(万)', kmc, mid_kmc, 'lower')]
+                road_econ = 0; cnt2 = 0
+                for metric, cur, target, direction in metrics2:
+                    ok = '✓' if (direction=='higher' and cur>=target) or (direction=='lower' and cur<=target) else '✗'
+                    if ok == '✓': cnt2 += 1
+                    self.benefit_econ_tree.insert('','end',values=(road,metric,f'{cur:.2f}',f'{target}',ok))
+                econ_scores[road] = (cnt2 / len(metrics2) * 100) if metrics2 else 0
+
+            # 综合评分
+            tech_avg = sum(tech_scores.values())/len(tech_scores) if tech_scores else 0
+            econ_avg = sum(econ_scores.values())/len(econ_scores) if econ_scores else 0
+            comp = calc_comprehensive_score(tech_avg, econ_avg)
+
+            self.benefit_text.delete('1.0','end')
+            self.benefit_text.insert('end', '='*50 + '\n')
+            self.benefit_text.insert('end', '  综合效益评估结果（技术+经济双维度）\n')
+            self.benefit_text.insert('end', '='*50 + '\n\n')
+            self.benefit_text.insert('end', f'  技术达标得分：{comp["技术得分"]:.1f} / 100  (权重 {int(comp["技术权重"]*100)}%)\n')
+            self.benefit_text.insert('end', f'  经济效益得分：{comp["经济得分"]:.1f} / 100  (权重 {int(comp["经济权重"]*100)}%)\n')
+            self.benefit_text.insert('end', f'  ──────────────────────\n')
+            self.benefit_text.insert('end', f'  综合得分：{comp["综合得分"]:.1f} / 100  等级：{comp["等级"]}\n')
+            self.benefit_text.insert('end', f'  建议：{comp["建议"]}\n')
+            if comp['综合得分'] < 75:
+                self.benefit_text.insert('end', '\n  ⚠ 综合得分不足，请返回调整后重新评估\n')
+            self.mark_step_done(9)
+            self.status_var.set(f'综合评估完成 — {comp["等级"]} ({comp["综合得分"]:.0f}分)')
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            messagebox.showerror('错误', str(e))
+
+    def _feedback_adjust(self):
+        messagebox.showinfo('反馈调整',
+            '请按以下步骤调整：\n\n'
+            '1. 返回【3.目标设定】调整养护目标\n'
+            '2. 返回【5.养护对策】调整触发阈值或单价\n'
+            '3. 重新运行【6.需求分析】\n'
+            '4. 重新运行【7.预算资金】\n'
+            '5. 重新导入【8.项目库】\n'
+            '6. 再次执行【9.效益评估】\n')
+        self._switch_step(3)
+
+    def _export_benefit(self):
+        # 导出技术+经济两份表到一个Excel
+        path = filedialog.asksaveasfilename(defaultextension='.xlsx', filetypes=[('Excel','*.xlsx')], initialfile='综合评估.xlsx')
+        if not path: return
+        with pd.ExcelWriter(path) as writer:
+            for prefix, tree in [('技术评估', self.benefit_tech_tree), ('经济评估', self.benefit_econ_tree)]:
+                rows = [tree.item(it,'values') for it in tree.get_children()]
+                if rows:
+                    pd.DataFrame(rows, columns=tree['columns']).to_excel(writer, sheet_name=prefix, index=False)
+        messagebox.showinfo('成功','综合评估报告已导出')
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  页面10: GIS地图
+    # ══════════════════════════════════════════════════════════════════════════
+    def _build_page10(self, parent):
+        self._section_title(parent, '🌍 GIS地图展示')
+        self._section_sub(parent, '基于Folium交互式地图，按PQI/PCI/RQI着色展示路况')
+
+        card = self._card(parent, '地图参数', expand=True)
+        r = self._row(card, 5)
+        tk.Label(r, text='县份', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left')
+        self.map_county_var = tk.StringVar(value='全部')
+        self.map_county_cb = ttk.Combobox(r, textvariable=self.map_county_var, width=10, state='readonly', values=['全部'])
+        self.map_county_cb.pack(side='left', padx=8)
+        tk.Label(r, text='年份', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left', padx=(15,0))
+        self.map_year_var = tk.StringVar(value='2025')
+        ttk.Combobox(r, textvariable=self.map_year_var, width=6, values=['2021','2022','2023','2024','2025']).pack(side='left', padx=5)
+        tk.Label(r, text='着色', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left', padx=(15,0))
+        self.map_color_var = tk.StringVar(value='PQI')
+        ttk.Combobox(r, textvariable=self.map_color_var, width=6, values=['PQI','PCI','RQI']).pack(side='left', padx=5)
+        tk.Button(r, text='🗺️ 生成地图', command=self._gen_map,
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 10), padx=12, cursor='hand2').pack(side='left', padx=20)
+
+        self.map_text = tk.Text(card, height=10, wrap='word', font=('Microsoft YaHei', 9))
+        self.map_text.pack(fill='both', expand=True, pady=(10,0))
+        self.map_text.insert('1.0','点击"生成地图"创建交互式路况地图\n\n需要安装依赖：pip install folium\n地图将生成为HTML文件，可在浏览器中打开查看。')
+
+    def _db_connect(self):
+        try:
+            from src.database import DatabaseManager, DatabaseConfig
+            self.db_mgr = DatabaseManager(DatabaseConfig(
+                host=self.db_host_var.get(), port=int(self.db_port_var.get()),
+                database=self.db_db_var.get(), user=self.db_user_var.get(), password=self.db_pass_var.get()))
+            if self.db_mgr.connect():
+                self.db_status.config(text='✓ 已连接', fg=THEME['success'])
+                self.db_text.insert('end','数据库连接成功\n')
+        except Exception as e:
+            self.db_text.insert('end',f'连接失败：{e}\n')
+
+    def _db_init(self):
+        if not hasattr(self,'db_mgr'): return
+        from src.database import RoadDataSchema
+        if RoadDataSchema.initialize_database(self.db_mgr): self.db_text.insert('end','表结构初始化完成\n')
+
+    def _db_import(self):
+        if not hasattr(self,'db_mgr'): return
+        from src.database import RoadDataImporter
+        fm = {y:v.get().strip() for y,v in self.file_vars.items() if v.get().strip() and os.path.exists(v.get().strip())}
+        imp = RoadDataImporter(self.db_mgr); s,p = imp.import_excel_data(fm)
+        self.db_text.insert('end',f'导入：{s}路段, {p}PQI记录\n')
+
+    def _db_sync(self):
+        """同步：从Excel加载数据并导入数据库"""
+        if not hasattr(self,'db_mgr'):
+            messagebox.showwarning('提示','请先连接数据库'); return
         if not self.data_cache:
-            messagebox.showwarning('提示', '请先加载数据')
-            return
-        
+            messagebox.showwarning('提示','请先加载Excel数据'); return
+        self._db_import()
+        messagebox.showinfo('同步完成', 'Excel数据已同步到数据库')
+        self.db_text.insert('end','数据同步完成\n')
+
+    def _gen_map(self):
+        if not self.data_cache: return
         try:
-            county, df = self._get_summary_source()
-            if df.empty:
-                messagebox.showwarning('提示', '当前没有可用于生成摘要的数据')
-                return
-            
-            # 获取数据基本信息
-            years = sorted(df['年份'].unique()) if '年份' in df.columns else []
-            latest_year = max(years) if years else None
-            
-            # 获取衰减率标定结果
-            from src.decay_calculator import calculate_decay_rates, get_yearly_summary
-            decay_rates = calculate_decay_rates(df, county if county != '全部' else None)
-            
-            # 获取年度养护汇总
-            yearly_summary = get_yearly_summary(df, county if county != '全部' else None)
-            
-            # 计算基本统计
-            total_length = df[df['年份'] == latest_year]['路段长度km'].sum() if latest_year and '路段长度km' in df.columns else 0
-            total_segments = len(df[df['年份'] == latest_year]) if latest_year else 0
-            
-            # 构建摘要文本
-            summary_parts = []
-            
-            # 1. 模型介绍
-            summary_parts.append("【模型介绍】")
-            summary_parts.append("本报告采用指数衰减模型预测PQI、PCI、RQI未来5年的变化趋势。")
-            summary_parts.append("模型公式：PQI_t = PQI_0 × exp(-k × t)，其中k为年衰减系数，t为年数。")
-            summary_parts.append("衰减系数基于2021-2025年实测数据标定，剔除养护干预路段后取中位数。")
-            summary_parts.append("")
-            
-            # 2. 参数标定结果
-            summary_parts.append("【参数标定结果】")
-            if decay_rates:
-                summary_parts.append("按路面类型×技术等级的PQI年衰减系数(k)：")
-                for (ptype, grade), vals in decay_rates.items():
-                    k_val = vals.get('PQI', '-')
-                    if k_val != '-':
-                        summary_parts.append(f"  • {ptype}-{grade}: k={k_val}")
+            from src.gis_map import GISMapGenerator
+            g = GISMapGenerator()
+            county = self.map_county_var.get()
+            df = pd.concat(self.data_cache.values(), ignore_index=True) if county=='全部' else self.data_cache.get(county, pd.DataFrame())
+            year = self.map_year_var.get()
+            if year and '年份' in df.columns: df = df[df['年份']==int(year)]
+            bmap = {'五华':(23.78,115.75),'蕉岭':(24.67,116.17),'和平':(24.47,114.94),'东源':(23.78,114.74)}
+            blat, blon = bmap.get(county, (23.88,115.36))
+            if 'lat_start' not in df.columns:
+                df['lat_start'] = [blat+random.uniform(-0.05,0.05) for _ in range(len(df))]
+                df['lon_start'] = [blon+random.uniform(-0.05,0.05) for _ in range(len(df))]
+                df['lat_end'] = [blat+random.uniform(-0.05,0.05) for _ in range(len(df))]
+                df['lon_end'] = [blon+random.uniform(-0.05,0.05) for _ in range(len(df))]
+            m = g.add_road_segments(df, color_by=self.map_color_var.get().lower())
+            if m:
+                path = g.save_map(m, f'map_{county}_{year}.html')
+                self.map_text.delete('1.0','end')
+                self.map_text.insert('1.0',f'地图已生成：{path}\n{len(df)}个路段\n\n在文件管理器中打开查看')
+                self.status_var.set('地图生成完成')
             else:
-                summary_parts.append("使用默认衰减系数（未检测到足够的历史数据用于标定）。")
-            summary_parts.append("")
-            
-            # 3. 数据概况
-            summary_parts.append("【数据概况】")
-            summary_parts.append(f"分析县份：{county}")
-            summary_parts.append(f"数据年份：{'、'.join(str(y) for y in years)}年")
-            if latest_year:
-                summary_parts.append(f"{latest_year}年检测路段：{total_segments}段，总里程{total_length:.1f}km")
-            summary_parts.append("")
-            
-            # 4. 养护需求预测
-            summary_parts.append("【养护需求预测（2026-2030）】")
-            if not yearly_summary.empty:
-                total_fund = yearly_summary[yearly_summary['年份']=='总计']['资金总计(万元)'].values
-                if len(total_fund) > 0:
-                    summary_parts.append(f"未来5年预计养护资金总需求：{total_fund[0]:.1f}万元")
-                
-                # 各年资金分布
-                summary_parts.append("各年度资金分配：")
-                for _, row in yearly_summary.iterrows():
-                    if row['年份'] != '总计':
-                        fund_total = row.get('资金总计(万元)', 0)
-                        summary_parts.append(f"  • {int(row['年份'])}年：{fund_total:.1f}万元")
-            summary_parts.append("")
-            
-            # 5. 养护触发条件
-            summary_parts.append("【养护触发条件】")
-            summary_parts.append("路面改造：")
-            summary_parts.append("  • 水泥路面一级公路：PCI<80 或 PQI<80")
-            summary_parts.append("  • 水泥路面二级及以下：PCI<75 或 PQI<75")
-            summary_parts.append("  • 沥青路面一级公路：PCI<80 或 RQI<80 或 PQI<80")
-            summary_parts.append("  • 沥青路面二级及以下：PCI<75 或 RQI<75 或 PQI<75")
-            summary_parts.append("预防养护：不满足路面改造条件，且指标处于中等水平的路段")
-            summary_parts.append("")
-            
-            # 6. 主要发现（待AI生成时补充）
-            summary_parts.append("【主要发现与建议】")
-            summary_parts.append("（此处内容由AI根据上述数据自动生成，包括：）")
-            summary_parts.append("- 路面技术状况总体评价")
-            summary_parts.append("- 历年变化趋势分析")
-            summary_parts.append("- 重点养护路段识别")
-            summary_parts.append("- 资金分配优化建议")
-            
-            # 填充到文本框
-            self.report_summary_text.delete('1.0', 'end')
-            self.report_summary_text.insert('1.0', '\n'.join(summary_parts))
-
-            if hasattr(self, 'report_county_var'):
-                self.report_county_var.set(county)
-            
-            messagebox.showinfo('成功', '报告摘要已自动填充\n您可以根据需要修改后生成报告')
-            
+                self.map_text.insert('end','需要安装：pip install folium\n')
         except Exception as e:
-            messagebox.showerror('错误', f'填充摘要失败：{str(e)}')
+            self.map_text.insert('end',f'错误：{e}\n')
 
-    def _save_llm_config(self):
-        config = self._load_config()
-        config['llm'] = {
-            'api_key': self.llm_vars.get('llm_key', tk.StringVar()).get(),
-            'base_url': self.llm_vars.get('llm_url', tk.StringVar()).get(),
-            'model': self.llm_vars.get('llm_model', tk.StringVar()).get(),
-        }
-        
-        with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
-        
-        messagebox.showinfo('成功', '配置已保存')
+    # ══════════════════════════════════════════════════════════════════════════
+    #  工具方法
+    # ══════════════════════════════════════════════════════════════════════════
+    def _get_data(self, county):
+        if not self.data_cache:
+            messagebox.showwarning('提示','请先加载数据'); return pd.DataFrame()
+        if county == '全部': return pd.concat(self.data_cache.values(), ignore_index=True)
+        return self.data_cache.get(county, pd.DataFrame())
 
-    def _save_callback_config(self):
-        """保存养护回调参数配置"""
-        if not set_maintenance_callback:
-            messagebox.showerror('错误', '无法保存回调参数')
-            return
-        
-        try:
-            config = {}
-            for key, var in self.callback_vars.items():
-                parts = key.split('_')
-                maint_type = parts[0]
-                ptype = parts[1]
-                idx = parts[2]
-                
-                if maint_type not in config:
-                    config[maint_type] = {}
-                if ptype not in config[maint_type]:
-                    config[maint_type][ptype] = {}
-                
-                config[maint_type][ptype][idx] = var.get()
-            
-            set_maintenance_callback(config)
-            
-            # 同时保存到配置文件
-            cfg = self._load_config()
-            cfg['maintenance_callback'] = config
-            with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
-                json.dump(cfg, f, ensure_ascii=False, indent=2)
-            
-            messagebox.showinfo('成功', '养护回调参数已保存')
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'保存失败：{str(e)}')
-
-    def _reset_callback_config(self):
-        """重置养护回调参数为默认值"""
-        if not set_maintenance_callback:
-            messagebox.showerror('错误', '无法重置回调参数')
-            return
-        
-        try:
-            set_maintenance_callback(None)  # None表示重置为默认值
-            
-            # 更新界面显示
-            default_callback = {
-                '路面改造': {
-                    '沥青路面': {'PQI': 92, 'PCI': 92, 'RQI': 93},
-                    '水泥路面': {'PQI': 88, 'PCI': 88, 'RQI': 90},
-                },
-                '预防性养护': {
-                    '沥青路面': {'PQI': 89, 'PCI': 89, 'RQI': 91},
-                    '水泥路面': {'PQI': 86, 'PCI': 86, 'RQI': 88},
-                },
-            }
-            
-            for key, var in self.callback_vars.items():
-                parts = key.split('_')
-                maint_type = parts[0]
-                ptype = parts[1]
-                idx = parts[2]
-                var.set(default_callback[maint_type][ptype][idx])
-            
-            # 清除配置文件中的设置
-            cfg = self._load_config()
-            cfg.pop('maintenance_callback', None)
-            with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
-                json.dump(cfg, f, ensure_ascii=False, indent=2)
-            
-            messagebox.showinfo('成功', '已恢复默认参数')
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'重置失败：{str(e)}')
-
-    # ── 养护触发模型参数管理 ──
-    
-    def _on_trigger_toggle(self):
-        """启用/禁用养护触发模型时，灰化/恢复参数输入框和年度配置勾选框"""
-        enabled = self.trigger_enabled_var.get()
-        state = 'normal' if enabled else 'disabled'
-        for child in self.trigger_params_frame.winfo_children():
-            self._set_children_state(child, state)
-        
-        # 同时控制年度配置勾选框的状态
-        for year_var in self.yearly_trigger_vars.values():
-            chk = year_var.get_widget() if hasattr(year_var, 'get_widget') else None
-            if chk:
-                chk.config(state=state)
-    
-    def _set_children_state(self, widget, state):
-        """递归设置子组件的state"""
-        try:
-            if isinstance(widget, (ttk.Entry,)):
-                widget.configure(state=state)
-        except:
-            pass
-        for child in widget.winfo_children():
-            if isinstance(child, tk.Checkbutton):
-                child.configure(state=state)
-            elif isinstance(child, ttk.Entry):
-                child.configure(state=state)
-            else:
-                self._set_children_state(child, state)
-    
-    def _collect_trigger_config(self):
-        """从UI收集触发模型参数，返回配置字典"""
-        config = {
-            '启用': self.trigger_enabled_var.get(),
-            '年度配置': {},
-            '路面改造': {}, 
-            '预防性养护': {},
-        }
-        
-        # 年度配置（按年份设置是否启用养护触发）
-        for year in range(2026, 2031):
-            config['年度配置'][year] = self.yearly_trigger_vars[year].get()
-        
-        # 路面改造参数
-        for ptype in ['沥青路面', '水泥路面']:
-            config['路面改造'][ptype] = {}
-            for grade in ['一级公路', '二级及以下']:
-                prefix = f'改造_{ptype}_{grade}'
-                config['路面改造'][ptype][grade] = {
-                    'PCI': self.trigger_vars[f'{prefix}_PCI'].get(),
-                    'PCI启用': self.trigger_vars[f'{prefix}_PCI启用'].get(),
-                    'PQI': self.trigger_vars[f'{prefix}_PQI'].get(),
-                    'PQI启用': self.trigger_vars[f'{prefix}_PQI启用'].get(),
-                    'RQI': self.trigger_vars[f'{prefix}_RQI'].get(),
-                    'RQI启用': self.trigger_vars[f'{prefix}_RQI启用'].get(),
-                }
-        
-        # 预防养护参数
-        for ptype in ['沥青路面', '水泥路面']:
-            config['预防性养护'][ptype] = {}
-            for grade in ['一级公路', '二级及以下']:
-                prefix = f'预防_{ptype}_{grade}'
-                config['预防性养护'][ptype][grade] = {
-                    'PCI低': self.trigger_vars[f'{prefix}_PCI低'].get(),
-                    'PCI高': self.trigger_vars[f'{prefix}_PCI高'].get(),
-                    'PCI启用': self.trigger_vars[f'{prefix}_PCI启用'].get(),
-                    'RQI低': self.trigger_vars[f'{prefix}_RQI低'].get(),
-                    'RQI高': self.trigger_vars[f'{prefix}_RQI高'].get(),
-                    'RQI启用': self.trigger_vars[f'{prefix}_RQI启用'].get(),
-                    'PQI': self.trigger_vars[f'{prefix}_PQI'].get(),
-                    'PQI启用': self.trigger_vars[f'{prefix}_PQI启用'].get(),
-                }
-        
-        return config
-    
-    def _save_trigger_config(self):
-        """保存养护触发模型参数"""
-        if not set_trigger_model:
-            messagebox.showerror('错误', '无法保存触发参数')
-            return
-        
-        try:
-            config = self._collect_trigger_config()
-            set_trigger_model(config)
-            # 如果已有预测数据，询问是否重新生成
-            if self.data_cache and self.pred_tree.get_children() and \
-               self.pred_tree.item(self.pred_tree.get_children()[0])['values'] and \
-               self.pred_tree.item(self.pred_tree.get_children()[0])['values'][0] != '请先加载数据并点击生成按钮':
-                if messagebox.askyesno('成功', '养护触发模型参数已保存，是否重新生成预测？'):
-                    self._generate_prediction()
-            else:
-                messagebox.showinfo('成功', '养护触发模型参数已保存')
-        except Exception as e:
-            messagebox.showerror('错误', f'保存失败：{str(e)}')
-    
-    def _reset_trigger_config(self):
-        """重置养护触发模型参数为默认值"""
-        if not set_trigger_model:
-            messagebox.showerror('错误', '无法重置触发参数')
-            return
-        
-        try:
-            set_trigger_model(None)  # 恢复默认
-            default = get_trigger_model()
-            
-            # 更新启用状态
-            self.trigger_enabled_var.set(default.get('启用', True))
-            
-            # 更新路面改造参数
-            for ptype in ['沥青路面', '水泥路面']:
-                for grade in ['一级公路', '二级及以下']:
-                    cfg = default.get('路面改造', {}).get(ptype, {}).get(grade, {})
-                    prefix = f'改造_{ptype}_{grade}'
-                    self.trigger_vars[f'{prefix}_PCI'].set(cfg.get('PCI', 80))
-                    self.trigger_vars[f'{prefix}_PCI启用'].set(cfg.get('PCI启用', True))
-                    self.trigger_vars[f'{prefix}_PQI'].set(cfg.get('PQI', 80))
-                    self.trigger_vars[f'{prefix}_PQI启用'].set(cfg.get('PQI启用', True))
-                    self.trigger_vars[f'{prefix}_RQI'].set(cfg.get('RQI', 80))
-                    self.trigger_vars[f'{prefix}_RQI启用'].set(cfg.get('RQI启用', False))
-            
-            # 更新预防养护参数
-            default_prev = {
-                ('沥青路面', '一级公路'): (80, 90, 80, 90, 80),
-                ('沥青路面', '二级及以下'): (78, 85, 78, 85, 75),
-                ('水泥路面', '一级公路'): (80, 90, 60, 85, 80),
-                ('水泥路面', '二级及以下'): (78, 85, 60, 85, 75),
-            }
-            for (ptype, grade), (pci_lo, pci_hi, rqi_lo, rqi_hi, pqi) in default_prev.items():
-                prefix = f'预防_{ptype}_{grade}'
-                self.trigger_vars[f'{prefix}_PCI低'].set(pci_lo)
-                self.trigger_vars[f'{prefix}_PCI高'].set(pci_hi)
-                self.trigger_vars[f'{prefix}_RQI低'].set(rqi_lo)
-                self.trigger_vars[f'{prefix}_RQI高'].set(rqi_hi)
-                self.trigger_vars[f'{prefix}_PQI'].set(pqi)
-            
-            self._on_trigger_toggle()
-            messagebox.showinfo('成功', '已恢复默认触发参数')
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'重置失败：{str(e)}')
-
-    # ════════════════════════════════════════
-    # 导出Excel和复制到剪贴板功能
-    # ════════════════════════════════════════
-    def _export_mileage_excel(self, mode='auto'):
-        """导出养护里程表到Excel"""
-        tree = self.mileage_tree_auto if mode == 'auto' else self.mileage_tree_manual
-        if not tree.get_children():
-            messagebox.showwarning('提示', '请先生成养护里程表')
-            return
-        
-        try:
-            import pandas as pd
-            
-            cols = tree['columns']
-            rows = []
-            for item in tree.get_children():
-                rows.append(tree.item(item, 'values'))
-            
-            if not rows:
-                messagebox.showwarning('提示', '没有数据可导出')
-                return
-            
-            df = pd.DataFrame(rows, columns=cols)
-            
-            file_path = filedialog.asksaveasfilename(
-                title='保存Excel文件',
-                defaultextension='.xlsx',
-                filetypes=[('Excel文件', '*.xlsx')],
-                initialfile=f'养护里程表_{"自动触发" if mode == "auto" else "手动规划"}.xlsx'
-            )
-            
-            if file_path:
-                df.to_excel(file_path, index=False, engine='openpyxl')
-                messagebox.showinfo('成功', f'已导出到：{file_path}')
-                
-        except Exception as e:
-            messagebox.showerror('错误', f'导出失败：{str(e)}')
-
-    def _copy_mileage_to_clipboard(self, mode='auto'):
-        """复制养护里程表到剪贴板"""
-        tree = self.mileage_tree_auto if mode == 'auto' else self.mileage_tree_manual
-        if not tree.get_children():
-            messagebox.showwarning('提示', '请先生成养护里程表')
-            return
-        
-        try:
-            cols = tree['columns']
-            header = '\t'.join(cols)
-            
-            lines = [header]
-            for item in tree.get_children():
-                row = tree.item(item, 'values')
-                lines.append('\t'.join(str(v) for v in row))
-            
-            self.clipboard_clear()
-            self.clipboard_append('\n'.join(lines))
-            
-            messagebox.showinfo('成功', '已复制到剪贴板')
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'复制失败：{str(e)}')
-
-    def _export_fund_excel(self, mode='auto'):
-        """导出养护资金表到Excel"""
-        tree = self.fund_tree_auto if mode == 'auto' else self.fund_tree_manual
-        if not tree.get_children():
-            messagebox.showwarning('提示', '请先生成养护资金表')
-            return
-        
-        try:
-            import pandas as pd
-            
-            cols = tree['columns']
-            rows = []
-            for item in tree.get_children():
-                rows.append(tree.item(item, 'values'))
-            
-            if not rows:
-                return
-            
-            df = pd.DataFrame(rows, columns=cols)
-            
-            file_path = filedialog.asksaveasfilename(
-                title='保存Excel文件',
-                defaultextension='.xlsx',
-                filetypes=[('Excel文件', '*.xlsx')],
-                initialfile=f'养护资金表_{"自动触发" if mode == "auto" else "手动规划"}.xlsx'
-            )
-            
-            if file_path:
-                df.to_excel(file_path, index=False, engine='openpyxl')
-                messagebox.showinfo('成功', f'已导出到：{file_path}')
-                
-        except Exception as e:
-            messagebox.showerror('错误', f'导出失败：{str(e)}')
-
-    def _copy_fund_to_clipboard(self, mode='auto'):
-        """复制养护资金表到剪贴板"""
-        tree = self.fund_tree_auto if mode == 'auto' else self.fund_tree_manual
-        if not tree.get_children():
-            messagebox.showwarning('提示', '请先生成养护资金表')
-            return
-        
-        try:
-            cols = tree['columns']
-            header = '\t'.join(cols)
-            
-            lines = [header]
-            for item in tree.get_children():
-                row = tree.item(item, 'values')
-                lines.append('\t'.join(str(v) for v in row))
-            
-            self.clipboard_clear()
-            self.clipboard_append('\n'.join(lines))
-            
-            messagebox.showinfo('成功', '已复制到剪贴板')
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'复制失败：{str(e)}')
-
-    def _export_yearly_excel(self, mode='auto'):
-        """导出年度汇总表到Excel"""
-        tree = self.yearly_tree_auto if mode == 'auto' else self.yearly_tree_manual
-        if not tree.get_children():
-            messagebox.showwarning('提示', '请先生成年度汇总表')
-            return
-        
-        try:
-            import pandas as pd
-            
-            cols = tree['columns']
-            rows = []
-            for item in tree.get_children():
-                rows.append(tree.item(item, 'values'))
-            
-            if not rows:
-                return
-            
-            df = pd.DataFrame(rows, columns=cols)
-            
-            file_path = filedialog.asksaveasfilename(
-                title='保存Excel文件',
-                defaultextension='.xlsx',
-                filetypes=[('Excel文件', '*.xlsx')],
-                initialfile=f'年度汇总表_{"自动触发" if mode == "auto" else "手动规划"}.xlsx'
-            )
-            
-            if file_path:
-                df.to_excel(file_path, index=False, engine='openpyxl')
-                messagebox.showinfo('成功', f'已导出到：{file_path}')
-                
-        except Exception as e:
-            messagebox.showerror('错误', f'导出失败：{str(e)}')
-
-    def _copy_yearly_to_clipboard(self, mode='auto'):
-        """复制年度汇总表到剪贴板"""
-        tree = self.yearly_tree_auto if mode == 'auto' else self.yearly_tree_manual
-        if not tree.get_children():
-            messagebox.showwarning('提示', '请先生成年度汇总表')
-            return
-        
-        try:
-            cols = tree['columns']
-            header = '\t'.join(cols)
-            
-            lines = [header]
-            for item in tree.get_children():
-                row = tree.item(item, 'values')
-                lines.append('\t'.join(str(v) for v in row))
-            
-            self.clipboard_clear()
-            self.clipboard_append('\n'.join(lines))
-            
-            messagebox.showinfo('成功', '已复制到剪贴板')
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'复制失败：{str(e)}')
-
-    def _export_decay_excel(self):
-        """导出衰减率标定表到Excel"""
-        if not self.decay_tree.get_children():
-            messagebox.showwarning('提示', '请先计算衰减率')
-            return
-        
-        try:
-            import pandas as pd
-            
-            cols = self.decay_tree['columns']
-            rows = []
-            for item in self.decay_tree.get_children():
-                rows.append(self.decay_tree.item(item, 'values'))
-            
-            if not rows:
-                messagebox.showwarning('提示', '没有数据可导出')
-                return
-            
-            df = pd.DataFrame(rows, columns=cols)
-            
-            file_path = filedialog.asksaveasfilename(
-                title='保存Excel文件',
-                defaultextension='.xlsx',
-                filetypes=[('Excel文件', '*.xlsx')],
-                initialfile='衰减率标定表.xlsx'
-            )
-            
-            if file_path:
-                df.to_excel(file_path, index=False, engine='openpyxl')
-                messagebox.showinfo('成功', f'已导出到：{file_path}')
-                
-        except Exception as e:
-            messagebox.showerror('错误', f'导出失败：{str(e)}')
-
-    def _copy_decay_to_clipboard(self):
-        """复制衰减率标定表到剪贴板"""
-        if not self.decay_tree.get_children():
-            messagebox.showwarning('提示', '请先计算衰减率')
-            return
-        
-        try:
-            cols = self.decay_tree['columns']
-            header = '\t'.join(cols)
-            
-            lines = [header]
-            for item in self.decay_tree.get_children():
-                row = self.decay_tree.item(item, 'values')
-                lines.append('\t'.join(str(v) for v in row))
-            
-            self.clipboard_clear()
-            self.clipboard_append('\n'.join(lines))
-            
-            messagebox.showinfo('成功', '已复制到剪贴板')
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'复制失败：{str(e)}')
-
-    def _export_prediction_excel(self):
-        """导出5年PQI预测表到Excel"""
-        if not self.pred_tree.get_children():
-            messagebox.showwarning('提示', '请先生成5年预测表')
-            return
-        
-        try:
-            import pandas as pd
-            
-            cols = self.pred_tree['columns']
-            rows = []
-            for item in self.pred_tree.get_children():
-                rows.append(self.pred_tree.item(item, 'values'))
-            
-            if not rows:
-                messagebox.showwarning('提示', '没有数据可导出')
-                return
-            
-            df = pd.DataFrame(rows, columns=cols)
-            
-            file_path = filedialog.asksaveasfilename(
-                title='保存Excel文件',
-                defaultextension='.xlsx',
-                filetypes=[('Excel文件', '*.xlsx')],
-                initialfile='5年PQI预测表.xlsx'
-            )
-            
-            if file_path:
-                df.to_excel(file_path, index=False, engine='openpyxl')
-                messagebox.showinfo('成功', f'已导出到：{file_path}')
-                
-        except Exception as e:
-            messagebox.showerror('错误', f'导出失败：{str(e)}')
-
-    def _copy_prediction_to_clipboard(self):
-        """复制5年PQI预测表到剪贴板"""
-        if not self.pred_tree.get_children():
-            messagebox.showwarning('提示', '请先生成5年预测表')
-            return
-        
-        try:
-            cols = self.pred_tree['columns']
-            header = '\t'.join(cols)
-            
-            lines = [header]
-            for item in self.pred_tree.get_children():
-                row = self.pred_tree.item(item, 'values')
-                lines.append('\t'.join(str(v) for v in row))
-            
-            self.clipboard_clear()
-            self.clipboard_append('\n'.join(lines))
-            
-            messagebox.showinfo('成功', '已复制到剪贴板')
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'复制失败：{str(e)}')
-
-    # ════════════════════════════════════════
-    # Tab 5: 生成报告
-    # ════════════════════════════════════════
-    def _build_report_tab(self, parent):
-        frame = ttk.Frame(parent)
-        frame.pack(fill='both', expand=True, padx=20, pady=20)
-        
-        ttk.Label(frame, text='生成Word报告', style='Title.TLabel').pack(anchor='w')
-        ttk.Label(frame, text='基于筛选数据生成完整的Word分析报告', style='Subtitle.TLabel').pack(anchor='w', pady=(0, 15))
-
-        # 报告选项
-        opt_card = ttk.LabelFrame(frame, text='报告选项', padding=15)
-        opt_card.pack(fill='x')
-
-        row = ttk.Frame(opt_card)
-        row.pack(fill='x', pady=5)
-        
-        tk.Label(row, text='报告县份：').pack(side='left')
-        self.report_county_var = tk.StringVar(value='全部')
-        self.report_county_cb = ttk.Combobox(row, textvariable=self.report_county_var,
-                                             width=12, state='readonly')
-        self.report_county_cb['values'] = ['全部']   # 加载数据后自动更新
-        self.report_county_cb.pack(side='left', padx=(0, 20))
-
-        tk.Label(row, text='输出文件：').pack(side='left')
-        self.report_path_var = tk.StringVar()
-        ttk.Entry(row, textvariable=self.report_path_var, width=30).pack(side='left', padx=5)
-        ttk.Button(row, text='浏览', command=self._browse_report_path, width=8).pack(side='left')
-
-        # 生成按钮
-        btn_frame = ttk.Frame(frame)
-        btn_frame.pack(fill='x', pady=20)
-        
-        ttk.Button(btn_frame, text='生成报告', command=self._generate_report,
-                   style='Primary.TButton').pack(side='left')
-
-        # 报告预览
-        preview_card = ttk.LabelFrame(frame, text='报告预览', padding=10)
-        preview_card.pack(fill='both', expand=True)
-
-        self.report_preview_text = tk.Text(preview_card, height=20, font=('Microsoft YaHei', 10))
-        self.report_preview_text.pack(fill='both', expand=True)
-
-    def _browse_report_path(self):
-        path = filedialog.asksaveasfilename(
-            title='保存报告',
-            defaultextension='.docx',
-            filetypes=[('Word文档', '*.docx')],
-            initialfile=f'公路养护需求分析报告.docx'
-        )
+    def _export_tree(self, tree):
+        if not tree.get_children(): return
+        path = filedialog.asksaveasfilename(title='导出', defaultextension='.xlsx', filetypes=[('Excel','*.xlsx')])
         if path:
-            self.report_path_var.set(path)
+            rows = [tree.item(it,'values') for it in tree.get_children()]
+            pd.DataFrame(rows, columns=tree['columns']).to_excel(path, index=False)
+            messagebox.showinfo('成功','已导出')
 
-    def _generate_report(self):
-        if not self.data_cache:
-            messagebox.showwarning('提示', '请先加载数据')
-            return
-
-        report_path = self.report_path_var.get().strip()
-        if not report_path:
-            report_path = os.path.join(BASE_DIR, 'output', '公路养护需求分析报告.docx')
-
-        county = self.report_county_var.get()
-        if county != '全部':
-            df = self.data_cache.get(county, pd.DataFrame())
-            if df.empty:
-                df = self._get_all_data_df()
-                df = df[df.get('县份', '') == county]
-        else:
-            df = self._get_all_data_df()
-
-        title = self.report_title_var.get()
-        summary = self.report_summary_text.get('1.0', 'end').strip()
-
-        api_key = self.llm_vars.get('llm_key', tk.StringVar()).get()
-        base_url = self.llm_vars.get('llm_url', tk.StringVar()).get()
-        model = self.llm_vars.get('llm_model', tk.StringVar()).get()
-
-        # 收集表格数据
-        table_data = {}
-        
-        # 年度趋势数据
-        if hasattr(self, 'decay_tree') and self.decay_tree.get_children():
-            trend_data = []
-            for item in self.decay_tree.get_children():
-                values = self.decay_tree.item(item)['values']
-                if values and len(values) > 1:
-                    trend_data.append(values)
-            if trend_data:
-                table_data['yearly_trend'] = pd.DataFrame(trend_data)
-        
-        # 养护里程数据
-        if hasattr(self, 'mileage_tree') and self.mileage_tree.get_children():
-            maint_data = []
-            for item in self.mileage_tree.get_children():
-                values = self.mileage_tree.item(item)['values']
-                if values:
-                    maint_data.append(values)
-            if maint_data:
-                table_data['maintenance'] = pd.DataFrame(maint_data)
-        
-        # 预测数据
-        if hasattr(self, 'pred_tree') and self.pred_tree.get_children():
-            pred_data = []
-            for item in self.pred_tree.get_children():
-                values = self.pred_tree.item(item)['values']
-                if values:
-                    pred_data.append(values)
-            if pred_data:
-                table_data['prediction'] = pd.DataFrame(pred_data)
-        
-        # 等级分布数据
-        if not df.empty:
-            if 'PQI' in df.columns:
-                def get_grade(pqi):
-                    if pd.isna(pqi):
-                        return '未知'
-                    if pqi >= 90:
-                        return '优'
-                    elif pqi >= 80:
-                        return '良'
-                    elif pqi >= 70:
-                        return '中'
-                    elif pqi >= 60:
-                        return '次'
-                    else:
-                        return '差'
-                
-                df['PQI等级'] = df['PQI'].apply(get_grade)
-                grade_dist = df.groupby('PQI等级')['路段长度km'].sum().reset_index()
-                grade_dist.columns = ['等级', '里程(km)']
-                table_data['grade_dist'] = grade_dist
-
-        # 收集图表路径
-        chart_paths = {}
-        output_dir = os.path.join(BASE_DIR, 'output')
-        
-        # 检查是否有生成的图表
-        chart_files = {
-            'trend': f'{county}_年度趋势.png',
-            'grade_dist': f'{county}_PQI等级分布.png',
-            'grade_stacked': f'{county}_历年等级堆叠.png',
-            'pavement_type': f'{county}_路面类型.png',
-            'tech_grade': f'{county}_技术等级.png',
-            'maintenance': f'{county}_养护需求.png',
-            'prediction': f'{county}_5年预测.png'
-        }
-        
-        for key, filename in chart_files.items():
-            filepath = os.path.join(output_dir, 'charts', filename)
-            if os.path.exists(filepath):
-                chart_paths[key] = filepath
-
-        self.status_var.set('正在生成报告...')
-        self.progressbar.start(10)
-        self.update()
-
-        try:
-            result = generate_word_report(
-                df, report_path, title=title, summary=summary,
-                api_key=api_key, base_url=base_url, model=model,
-                table_data=table_data, chart_paths=chart_paths,
-                progress_callback=lambda msg: self.status_var.set(msg)
-            )
-
-            self.report_preview_text.delete('1.0', 'end')
-            self.report_preview_text.insert('1.0', result)
-
-            messagebox.showinfo('成功', f'报告已保存到：{report_path}')
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'生成失败：{str(e)}')
-
-        self.progressbar.stop()
-        self.status_var.set('就绪')
-
-    def _export_segment_plan_excel(self, df):
-        """导出路段级养护计划到Excel"""
-        if df.empty:
-            messagebox.showinfo('提示', '没有可导出的数据')
-            return
-        
-        path = filedialog.asksaveasfilename(
-            title='导出路段级养护计划',
-            defaultextension='.xlsx',
-            filetypes=[('Excel文件', '*.xlsx')],
-            initialfile='路段级养护计划.xlsx'
-        )
-        if path:
-            try:
-                df.to_excel(path, index=False)
-                messagebox.showinfo('成功', f'已导出到：{path}')
-            except Exception as e:
-                messagebox.showerror('错误', f'导出失败：{str(e)}')
-
-    def _copy_segment_plan_to_clipboard(self, df):
-        """复制路段级养护计划到剪贴板"""
-        if df.empty:
-            messagebox.showinfo('提示', '没有可复制的数据')
-            return
-        
-        try:
-            # 将DataFrame转换为剪贴板格式
-            clipboard_content = df.to_csv(sep='\t', index=False)
-            self.clipboard_clear()
-            self.clipboard_append(clipboard_content)
-            messagebox.showinfo('成功', '已复制到剪贴板')
-        except Exception as e:
-            messagebox.showerror('错误', f'复制失败：{str(e)}')
-
-    def _export_good_road_excel(self, df):
-        """导出PQI优良路率预测到Excel"""
-        if df.empty:
-            messagebox.showinfo('提示', '没有可导出的数据')
-            return
-        
-        path = filedialog.asksaveasfilename(
-            title='导出PQI优良路率预测',
-            defaultextension='.xlsx',
-            filetypes=[('Excel文件', '*.xlsx')],
-            initialfile='PQI优良路率预测.xlsx'
-        )
-        if path:
-            try:
-                df.to_excel(path, index=False)
-                messagebox.showinfo('成功', f'已导出到：{path}')
-            except Exception as e:
-                messagebox.showerror('错误', f'导出失败：{str(e)}')
-
-    def _copy_good_road_to_clipboard(self, df):
-        """复制PQI优良路率预测到剪贴板"""
-        if df.empty:
-            messagebox.showinfo('提示', '没有可复制的数据')
-            return
-        
-        try:
-            # 将DataFrame转换为剪贴板格式
-            clipboard_content = df.to_csv(sep='\t', index=False)
-            self.clipboard_clear()
-            self.clipboard_append(clipboard_content)
-            messagebox.showinfo('成功', '已复制到剪贴板')
-        except Exception as e:
-            messagebox.showerror('错误', f'复制失败：{str(e)}')
-
-
-    # ════════════════════════════════════════
-    # PQI-Proj. IMP 手动养护规划方法
-    # ════════════════════════════════════════
-    def _generate_pqi_proj(self):
-        """生成PQI-Proj. IMP预测表（手动养护规划）"""
-        if not self.data_cache:
-            messagebox.showwarning('提示', '请先加载数据')
-            return
-        
-        try:
-            county = self.filter_county_var.get()
-            
-            all_df = pd.concat(self.data_cache.values(), ignore_index=True)
-            if county != '全部' and '县份' in all_df.columns:
-                df = all_df[all_df['县份'] == county].copy()
-            else:
-                df = all_df.copy()
-            
-            from src.decay_calculator import predict_5year_pqi_with_manual_plan
-            
-            result_df = predict_5year_pqi_with_manual_plan(df, county, self.manual_plans)
-            
-            if result_df.empty:
-                self.pqi_proj_tree.delete(*self.pqi_proj_tree.get_children())
-                self.pqi_proj_tree.insert('', 'end', values=('没有数据',))
-                return
-            
-            self.pqi_proj_tree.delete(*self.pqi_proj_tree.get_children())
-            self.pqi_proj_tree['columns'] = list(result_df.columns)
-            for col in result_df.columns:
-                self.pqi_proj_tree.heading(col, text=col)
-                col_width = len(str(col)) * 8 + 10
-                for _, row in result_df.iterrows():
-                    cell_text = str(row.get(col, ''))
-                    cn_chars = sum(1 for c in cell_text if '\u4e00' <= c <= '\u9fff')
-                    en_chars = len(cell_text) - cn_chars
-                    cell_width = cn_chars * 10 + en_chars * 6 + 10
-                    col_width = max(col_width, cell_width)
-                col_width = min(col_width, 100)
-                self.pqi_proj_tree.column(col, width=col_width, minwidth=40, anchor='center', stretch=False)
-            
-            for _, row in result_df.iterrows():
-                values = [str(row.get(col, '')) for col in result_df.columns]
-                self.pqi_proj_tree.insert('', 'end', values=values)
-            
-            self._update_pqi_proj_good_road_rate()
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'生成失败：{str(e)}')
-    
-    def _update_pqi_proj_good_road_rate(self):
-        """更新PQI优良路率"""
-        if not self.data_cache:
-            return
-        
-        try:
-            county = self.filter_county_var.get()
-            df = self.filtered_df
-            
-            from src.decay_calculator import calculate_good_road_rate_with_manual_plan
-            
-            good_road_df = calculate_good_road_rate_with_manual_plan(df, county, self.manual_plans)
-            
-            self.pqi_proj_good_road_tree.delete(*self.pqi_proj_good_road_tree.get_children())
-            
-            if good_road_df.empty:
-                self.pqi_proj_good_road_tree.insert('', 'end', values=('没有数据',))
-                return
-            
-            cols = ['年份', '道路类型', 'PQI≥80的路段里程(km)', '总里程(km)', '优良路率(%)']
-            self.pqi_proj_good_road_tree['columns'] = cols
-            for col in cols:
-                self.pqi_proj_good_road_tree.heading(col, text=col)
-                col_width = len(str(col)) * 8 + 10
-                for _, row in good_road_df.iterrows():
-                    cell_text = str(row.get(col, ''))
-                    cn_chars = sum(1 for c in cell_text if '\u4e00' <= c <= '\u9fff')
-                    en_chars = len(cell_text) - cn_chars
-                    cell_width = cn_chars * 10 + en_chars * 6 + 10
-                    col_width = max(col_width, cell_width)
-                col_width = min(col_width, 150)
-                self.pqi_proj_good_road_tree.column(col, width=col_width, minwidth=40, anchor='center', stretch=False)
-            
-            for _, row in good_road_df.iterrows():
-                self.pqi_proj_good_road_tree.insert('', 'end', values=(
-                    row['年份'],
-                    row['道路类型'],
-                    row['PQI≥80的路段里程(km)'],
-                    row['总里程(km)'],
-                    row['优良路率(%)']
-                ))
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'计算优良路率失败：{str(e)}')
-    
-    def _add_manual_maintenance(self):
-        """添加或修改手动养护规划"""
-        route = self.manual_route_var.get().strip()
-        start = self.manual_start_var.get().strip()
-        end = self.manual_end_var.get().strip()
-        year = self.manual_year_var.get().strip()
-        maint_type = self.manual_maint_type_var.get()
-        
-        if not route:
-            messagebox.showwarning('提示', '请输入路线编码')
-            return
-        
-        if year not in [str(y) for y in range(2026, 2031)]:
-            messagebox.showwarning('提示', '年份必须在2026-2030之间')
-            return
-        
-        plan = {
-            'route': route,
-            'start': start,
-            'end': end,
-            'year': int(year),
-            'maint_type': maint_type
-        }
-        
-        selected_items = self.manual_plan_tree.selection()
-        if selected_items:
-            selected_item = selected_items[0]
-            for i, existing_plan in enumerate(self.manual_plans):
-                if existing_plan == self._get_plan_from_tree_item(selected_item):
-                    self.manual_plans[i] = plan
-                    self.manual_plan_tree.item(selected_item, values=(route, start if start else '全部', end if end else '全部', year, maint_type))
-                    return
-        else:
-            if plan not in self.manual_plans:
-                self.manual_plans.append(plan)
-                self.manual_plan_tree.insert('', 'end', values=(route, start if start else '全部', end if end else '全部', year, maint_type))
-            else:
-                messagebox.showwarning('提示', '该养护规划已存在')
-    
-    def _get_plan_from_tree_item(self, item_id):
-        """从Treeview项获取规划字典"""
-        values = self.manual_plan_tree.item(item_id, 'values')
-        if values:
-            return {
-                'route': values[0],
-                'start': values[1] if values[1] != '全部' else '',
-                'end': values[2] if values[2] != '全部' else '',
-                'year': int(values[3]),
-                'maint_type': values[4]
-            }
-        return None
-    
-    def _on_manual_plan_select(self, event):
-        """选择手动养护规划时自动填充表单"""
-        selected_items = self.manual_plan_tree.selection()
-        if selected_items:
-            selected_item = selected_items[0]
-            values = self.manual_plan_tree.item(selected_item, 'values')
-            if values:
-                self.manual_route_var.set(values[0])
-                self.manual_start_var.set(values[1] if values[1] != '全部' else '')
-                self.manual_end_var.set(values[2] if values[2] != '全部' else '')
-                self.manual_year_var.set(values[3])
-                self.manual_maint_type_var.set(values[4])
-    
-    def _clear_manual_maintenance(self):
-        """清空手动养护规划"""
-        self.manual_plans.clear()
-        self.manual_plan_tree.delete(*self.manual_plan_tree.get_children())
-        messagebox.showinfo('成功', '已清空所有养护规划')
-    
-    def _export_pqi_proj_excel(self):
-        """导出PQI-Proj. IMP预测表到Excel"""
-        if not self.pqi_proj_tree.get_children():
-            messagebox.showwarning('提示', '请先生成预测表')
-            return
-        
-        try:
-            import pandas as pd
-            
-            cols = self.pqi_proj_tree['columns']
-            rows = []
-            for item in self.pqi_proj_tree.get_children():
-                rows.append(self.pqi_proj_tree.item(item, 'values'))
-            
-            if not rows:
-                messagebox.showwarning('提示', '没有数据可导出')
-                return
-            
-            df = pd.DataFrame(rows, columns=cols)
-            
-            file_path = filedialog.asksaveasfilename(
-                title='保存Excel文件',
-                defaultextension='.xlsx',
-                filetypes=[('Excel文件', '*.xlsx')],
-                initialfile='PQI-Proj_IMP预测表.xlsx'
-            )
-            
-            if file_path:
-                df.to_excel(file_path, index=False, engine='openpyxl')
-                messagebox.showinfo('成功', f'已导出到：{file_path}')
-                
-        except Exception as e:
-            messagebox.showerror('错误', f'导出失败：{str(e)}')
-    
-    def _copy_pqi_proj_to_clipboard(self):
-        """复制PQI-Proj. IMP预测表到剪贴板"""
-        if not self.pqi_proj_tree.get_children():
-            messagebox.showwarning('提示', '请先生成预测表')
-            return
-        
-        try:
-            cols = self.pqi_proj_tree['columns']
-            header = '\t'.join(cols)
-            
-            lines = [header]
-            for item in self.pqi_proj_tree.get_children():
-                row = self.pqi_proj_tree.item(item, 'values')
-                lines.append('\t'.join(str(v) for v in row))
-            
-            self.clipboard_clear()
-            self.clipboard_append('\n'.join(lines))
-            
-            messagebox.showinfo('成功', '已复制到剪贴板')
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'复制失败：{str(e)}')
-    
-    def _export_pqi_proj_good_road_excel(self):
-        """导出PQI-Proj. IMP优良路率到Excel"""
-        if not self.pqi_proj_good_road_tree.get_children():
-            messagebox.showwarning('提示', '请先生成预测表')
-            return
-        
-        try:
-            import pandas as pd
-            
-            cols = self.pqi_proj_good_road_tree['columns']
-            rows = []
-            for item in self.pqi_proj_good_road_tree.get_children():
-                rows.append(self.pqi_proj_good_road_tree.item(item, 'values'))
-            
-            if not rows:
-                messagebox.showwarning('提示', '没有数据可导出')
-                return
-            
-            df = pd.DataFrame(rows, columns=cols)
-            
-            file_path = filedialog.asksaveasfilename(
-                title='保存Excel文件',
-                defaultextension='.xlsx',
-                filetypes=[('Excel文件', '*.xlsx')],
-                initialfile='PQI-Proj_IMP优良路率.xlsx'
-            )
-            
-            if file_path:
-                df.to_excel(file_path, index=False, engine='openpyxl')
-                messagebox.showinfo('成功', f'已导出到：{file_path}')
-                
-        except Exception as e:
-            messagebox.showerror('错误', f'导出失败：{str(e)}')
-    
-    def _copy_pqi_proj_good_road_to_clipboard(self):
-        """复制PQI-Proj. IMP优良路率到剪贴板"""
-        if not self.pqi_proj_good_road_tree.get_children():
-            messagebox.showwarning('提示', '请先生成预测表')
-            return
-        
-        try:
-            cols = self.pqi_proj_good_road_tree['columns']
-            header = '\t'.join(cols)
-            
-            lines = [header]
-            for item in self.pqi_proj_tree.get_children():
-                row = self.pqi_proj_good_road_tree.item(item, 'values')
-                lines.append('\t'.join(str(v) for v in row))
-            
-            self.clipboard_clear()
-            self.clipboard_append('\n'.join(lines))
-            
-            messagebox.showinfo('成功', '已复制到剪贴板')
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'复制失败：{str(e)}')
-    
-    def _save_pqi_proj_callback_config(self):
-        """保存PQI-Proj回调参数配置"""
-        if not set_maintenance_callback:
-            messagebox.showerror('错误', '无法保存回调参数')
-            return
-        
-        try:
-            config = {}
-            for key, var in self.pqi_proj_callback_vars.items():
-                parts = key.split('_')
-                maint_type = parts[0]
-                ptype = parts[1]
-                idx = parts[2]
-                
-                if maint_type not in config:
-                    config[maint_type] = {}
-                if ptype not in config[maint_type]:
-                    config[maint_type][ptype] = {}
-                
-                config[maint_type][ptype][idx] = var.get()
-            
-            set_maintenance_callback(config)
-            
-            cfg = self._load_config()
-            cfg['maintenance_callback'] = config
-            with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
-                json.dump(cfg, f, ensure_ascii=False, indent=2)
-            
-            messagebox.showinfo('成功', '养护回调参数已保存')
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'保存失败：{str(e)}')
-    
-    def _reset_pqi_proj_callback_config(self):
-        """重置PQI-Proj回调参数为默认值"""
-        if not set_maintenance_callback:
-            messagebox.showerror('错误', '无法重置回调参数')
-            return
-        
-        try:
-            set_maintenance_callback(None)
-            
-            default_callback = {
-                '路面改造': {
-                    '沥青路面': {'PQI': 92, 'PCI': 92, 'RQI': 93},
-                    '水泥路面': {'PQI': 88, 'PCI': 88, 'RQI': 90},
-                },
-                '预防性养护': {
-                    '沥青路面': {'PQI': 89, 'PCI': 89, 'RQI': 91},
-                    '水泥路面': {'PQI': 86, 'PCI': 86, 'RQI': 88},
-                },
-            }
-            
-            for key, var in self.pqi_proj_callback_vars.items():
-                parts = key.split('_')
-                maint_type = parts[0]
-                ptype = parts[1]
-                idx = parts[2]
-                var.set(default_callback.get(maint_type, {}).get(ptype, {}).get(idx, 90))
-            
-            messagebox.showinfo('成功', '已恢复默认回调参数')
-            
-        except Exception as e:
-            messagebox.showerror('错误', f'重置失败：{str(e)}')
+    def _df_to_tree(self, tree, df):
+        tree.delete(*tree.get_children())
+        tree['columns'] = list(df.columns); tree['show'] = 'headings'
+        for c in df.columns:
+            tree.heading(c, text=c); tree.column(c, width=90, anchor='center')
+        for _, row in df.iterrows():
+            tree.insert('','end',values=[f'{v:.2f}' if isinstance(v,float) else str(v) for v in row])
 
 
 if __name__ == '__main__':

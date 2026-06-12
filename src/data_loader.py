@@ -32,12 +32,15 @@ CORE_COLS = [
     'PQI', 'PCI', 'RQI', '路面宽度',
 ]
 
-# 附加字段（部分年份有）
+# 附加字段（部分年份有，缺少时自动填充默认值）
 EXTRA_COLS = [
     'PQI分级', 'PCI分级', 'RQI分级',
     'PBI', 'RDI', 'PWI',
     'DR', 'IRI', 'RD',
     '块修(m2)', '条修(m2)', '龟裂/破碎板(m2)', '松散/露骨(m2)', '坑槽(m2)', '横缝(m)', '纵缝(m)',
+    '路龄', '交通量',           # 经济分析字段（AADT/路龄）
+    '修建年份', '大修年份',     # 维护历史字段
+    '日均交通量', '车道数',     # 交通荷载字段
 ]
 
 # 剔除标记字段（用于过滤无效路段）
@@ -112,7 +115,28 @@ def load_year_sheet(filepath: str, year: int, sheet_name: str) -> pd.DataFrame:
         df['PCI分级'] = df['PCI'].apply(classify_pci)
     if 'RQI分级' not in df.columns and 'RQI' in df.columns:
         df['RQI分级'] = df['RQI'].apply(classify_rqi)
-    
+
+    # 经济分析字段：缺失时填充默认值
+    # 路龄：默认根据修建年份或假设为5年
+    if '路龄' not in df.columns:
+        if '修建年份' in df.columns:
+            df['路龄'] = year - pd.to_numeric(df['修建年份'], errors='coerce')
+        else:
+            df['路龄'] = 5
+    # 交通量(AADT)：默认5000辆/天
+    for col in ['交通量', '日均交通量']:
+        if col in df.columns and '交通量' not in df.columns:
+            df.rename(columns={col: '交通量'}, inplace=True)
+    if '交通量' not in df.columns:
+        df['交通量'] = 5000
+    # 车道数：默认2车道
+    if '车道数' not in df.columns:
+        df['车道数'] = 2
+    # 数值化
+    for col in ['路龄', '交通量', '车道数']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna({'路龄':5,'交通量':5000,'车道数':2}[col])
+
     # 剔除PQI/PCI/RQI全为空的行
     df = df.dropna(subset=['PQI', 'PCI', 'RQI'], how='all')
     
@@ -126,17 +150,17 @@ def load_year_sheet(filepath: str, year: int, sheet_name: str) -> pd.DataFrame:
 def load_all_data(file_map: dict, counties: list = None) -> dict:
     """
     加载所有年份所有县份数据
-    
+
     Args:
         file_map: {year(int or str): filepath} 字典
         counties: 要加载的县份列表，None表示加载全部
-    
+
     Returns:
         {county_name: DataFrame(所有年份合并)} 字典
     """
     all_records = []
     county_set = set()
-    
+
     for year_key, filepath in file_map.items():
         if not filepath or not os.path.exists(filepath):
             continue
@@ -152,20 +176,20 @@ def load_all_data(file_map: dict, counties: list = None) -> dict:
                     df = load_year_sheet(filepath, year, sheet)
                     all_records.append(df)
                 except Exception as e:
-                    print(f"警告：加载 {year} {sheet} 失败: {e}")
+                    print(f"Warning: Failed to load {year} {sheet}: {e}")
         except Exception as e:
-            print(f"警告：无法打开文件 {filepath}: {e}")
-    
+            print(f"Warning: Cannot open file {filepath}: {e}")
+
     if not all_records:
         return {}
-    
+
     merged = pd.concat(all_records, ignore_index=True)
-    
+
     result = {}
     for county in county_set:
         result[county] = merged[merged['县份'] == county].reset_index(drop=True)
     result['全部'] = merged.reset_index(drop=True)
-    
+
     return result
 
 
