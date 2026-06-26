@@ -468,7 +468,7 @@ class App(tk.Tk):
             cv = ['全部']+sorted(counties); yv = ['全部']+[str(y) for y in sorted(years)]
             self.filter_county_cb['values'] = cv; self.filter_year_cb['values'] = yv
             # 更新所有页面的县份下拉
-            for a in ['tech_county_cb','model_county_cb','demand_county_cb','budget_county_cb','map_county_cb']:
+            for a in ['tech_county_cb','model_county_cb','demand_county_cb','benefit_county_cb','map_county_cb']:
                 if hasattr(self, a): getattr(self, a)['values'] = cv
             if counties:
                 self.filter_county_var.set(counties[0])
@@ -990,65 +990,23 @@ class App(tk.Tk):
     #  页面4: 预测模型
     # ══════════════════════════════════════════════════════════════════════════
     def _build_page4(self, parent):
-        self._section_title(parent, '📈 性能预测模型')
-        self._section_sub(parent, '使用指数衰减模型 PQI(t)=PQI₀×e^(-k×t)，基于历年数据回归标定')
-
-        card = self._card(parent, '模型参数')
-        r = self._row(card)
-        tk.Label(r, text='县份：', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left')
-        self.model_county_var = tk.StringVar(value='全部')
-        self.model_county_cb = ttk.Combobox(r, textvariable=self.model_county_var, width=12, state='readonly', values=['全部'])
-        self.model_county_cb.pack(side='left', padx=8)
-        tk.Button(r, text='计算衰减率', command=self._calc_decay,
-                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 10), padx=12, cursor='hand2').pack(side='left', padx=10)
-        tk.Button(r, text='5年预测', command=self._gen_prediction,
-                 font=('Microsoft YaHei', 9), padx=8).pack(side='left', padx=5)
-        tk.Button(r, text='养护计划', command=self._calc_maint_plan,
-                 font=('Microsoft YaHei', 9), padx=8).pack(side='left', padx=5)
-
-        # 衰减率表格
-        card2 = self._card(parent, '衰减系数标定', expand=True)
-        cols = ('路面类型','技术等级','PQI衰减k','PCI衰减k','RQI衰减k','样本数')
-        self.decay_tree = ttk.Treeview(card2, columns=cols, show='headings', height=6)
-        for c in cols: self.decay_tree.heading(c, text=c); self.decay_tree.column(c, width=110, anchor='center')
-        self.decay_tree.pack(fill='both', expand=True)
-        r = self._row(parent, 5)
-        tk.Button(r, text='📥 导出', command=lambda:self._export_tree(self.decay_tree), font=('Microsoft YaHei',9)).pack(side='left', padx=20)
-
-        # 预测结果表格
-        card3 = self._card(parent, '预测/计划结果', expand=True)
-        self.pred_tree = ttk.Treeview(card3, show='headings', height=8)
-        self.pred_tree.pack(fill='both', expand=True)
+        self._section_title(parent, '📈 性能预测（已整合）')
+        self._section_sub(parent, '衰减率标定、5年预测、养护计划已整合至第5页「对策模型」和第6页「需求分析」')
+        card = self._card(parent)
+        tk.Label(card, text='请前往：', bg=THEME['card'], font=('Microsoft YaHei', 12)).pack(anchor='w', pady=5)
+        tk.Label(card, text='  · 第5页「对策模型」→ 衰减率标定', bg=THEME['card'], fg=THEME['accent'],
+                font=('Microsoft YaHei', 11)).pack(anchor='w', pady=3)
+        tk.Label(card, text='  · 第6页「需求分析」→ 5年PQI预测 + 养护计划计算', bg=THEME['card'], fg=THEME['accent'],
+                font=('Microsoft YaHei', 11)).pack(anchor='w', pady=3)
+        tk.Button(card, text='跳转到对策模型 (Tab 5)', command=lambda: self._switch_step(5),
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 12), padx=20, pady=5).pack(pady=15)
 
     def _calc_decay(self):
-        from src.decay_calculator import calculate_decay_rates, get_calibration_table
-        df = self._get_data(self.model_county_var.get())
-        if df.empty: return
-        c = None if self.model_county_var.get()=='全部' else self.model_county_var.get()
-        table = get_calibration_table(df, c)
-        self.decay_tree.delete(*self.decay_tree.get_children())
-        for row in table: self.decay_tree.insert('','end',values=row)
-        self.mark_step_done(4); self.status_var.set('衰减率标定完成')
-
+        pass
     def _gen_prediction(self):
-        from src.decay_calculator import predict_5year_pqi
-        df = self._get_data(self.model_county_var.get() or None)
-        if df.empty: return
-        c = None if self.model_county_var.get() in ['全部',''] else self.model_county_var.get()
-        result = predict_5year_pqi(df, c)
-        if result is not None and not result.empty:
-            self._df_to_tree(self.pred_tree, result)
-            self.status_var.set(f'5年预测完成 — {len(result)}条路线')
-
+        pass
     def _calc_maint_plan(self):
-        from src.decay_calculator import get_yearly_summary
-        df = self._get_data(self.model_county_var.get() or None)
-        if df.empty: return
-        c = None if self.model_county_var.get() in ['全部',''] else self.model_county_var.get()
-        result = get_yearly_summary(df, c)
-        if result is not None and not result.empty:
-            self._df_to_tree(self.pred_tree, result)
-            self.status_var.set('养护计划计算完成')
+        pass
 
     # ══════════════════════════════════════════════════════════════════════════
     #  页面5: 养护对策
