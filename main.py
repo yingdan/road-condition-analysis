@@ -1067,11 +1067,26 @@ class App(tk.Tk):
         cvs.bind('<Configure>', _cfg)
         sf.bind('<Configure>', lambda e: cvs.configure(scrollregion=cvs.bbox('all')))
 
-        self._section_title(sf, '⚙️ 养护对策模型')
-        self._section_sub(sf, '配置养护触发阈值、养护后路面状况回调值及养护方案单价')
+        self._section_title(sf, '⚙️ 对策模型')
+        self._section_sub(sf, '一、衰减率标定 | 二、触发阈值 | 三、回调值 | 四、方案单价')
 
-        # 一、触发阈值
-        card = self._card(sf, '一、养护触发阈值')
+        # 一、衰减率标定
+        tf = ttk.LabelFrame(sf, text='一、衰减率标定 - PQI(t)=PQI0*exp(-k*t)', padding=8)
+        tf.pack(fill='x', padx=10, pady=5)
+        r = self._row(tf)
+        tk.Label(r, text='县份：', bg=self._bg(tf), font=('Microsoft YaHei',9)).pack(side='left')
+        self.model_county_var = tk.StringVar(value='全部')
+        self.model_county_cb = ttk.Combobox(r, textvariable=self.model_county_var, width=12, state='readonly', values=['全部'])
+        self.model_county_cb.pack(side='left', padx=8)
+        tk.Button(r, text='计算衰减率', command=self._calc_decay, bg=THEME['accent'], fg='white',
+                 font=('Microsoft YaHei',9), padx=10, cursor='hand2').pack(side='left', padx=8)
+        cols = ('路面类型','技术等级','PQI衰减k','PCI衰减k','RQI衰减k','样本数')
+        self.decay_tree = ttk.Treeview(tf, columns=cols, show='headings', height=5)
+        for c in cols: self.decay_tree.heading(c, text=c); self.decay_tree.column(c, width=100, anchor='center')
+        self.decay_tree.pack(fill='x', pady=(5,0))
+
+        # 二、触发阈值
+        card = self._card(sf, '二、养护触发阈值')
         self.trigger_vars = {}
         tk.Label(card, text='【路面改造】满足任一条件即触发', bg=THEME['card'],
                 fg=THEME['accent'], font=('Microsoft YaHei', 9, 'bold')).pack(anchor='w')
@@ -1105,8 +1120,8 @@ class App(tk.Tk):
                 v = tk.IntVar(value=dv); self.trigger_vars[f'{m}_{pt}_{g}_{idx}'] = v
                 ttk.Entry(r, textvariable=v, width=6).pack(side='left')
 
-        # 二、回调值
-        card2 = self._card(sf, '二、养护后PQI/PCI/RQI回调值 — 养护后路面回升到的目标值')
+        # 三、回调值
+        card2 = self._card(sf, '三、养护后PQI/PCI/RQI回调值')
         self.callback_vars = {}
         h3 = self._row(card2, 3)
         for t,w in [('养护类型',12),('路面类型',10),('PQI回升值',9),('PCI回升值',9),('RQI回升值',9)]:
@@ -1122,8 +1137,8 @@ class App(tk.Tk):
                 v = tk.IntVar(value=dv); self.callback_vars[f'{m}_{pt}_{idx}'] = v
                 ttk.Entry(r, textvariable=v, width=8).pack(side='left')
 
-        # 三、养护方案单价明细表（双击单价可编辑）
-        card3 = ttk.LabelFrame(sf, text='三、养护方案单价明细', padding=8)
+        # 四、养护方案单价明细表（双击单价可编辑）
+        card3 = ttk.LabelFrame(sf, text='四、养护方案单价明细', padding=8)
         card3.pack(fill='x', padx=10, pady=5)
         cols_p = ('路面类型','养护工程','技术等级','养护方案','单价')
         self.price_tree = ttk.Treeview(card3, columns=cols_p, show='headings', height=15)
@@ -1163,6 +1178,16 @@ class App(tk.Tk):
                  padx=18, pady=4, cursor='hand2').pack(side='left', padx=20)
         tk.Button(r, text='↺ 恢复默认', command=self._reset_policy_config,
                  font=('Microsoft YaHei', 9), padx=12).pack(side='left', padx=5)
+
+    def _calc_decay(self):
+        from src.decay_calculator import get_calibration_table
+        df = self._get_data(self.model_county_var.get() if hasattr(self,'model_county_var') else '全部')
+        if df.empty: return
+        cty = None if self.model_county_var.get()=='全部' else self.model_county_var.get()
+        table = get_calibration_table(df, cty)
+        self.decay_tree.delete(*self.decay_tree.get_children())
+        for row in table: self.decay_tree.insert('','end',values=row)
+        self.status_var.set('衰减率标定完成')
 
     def _on_price_dclick(self, event):
         if self.price_tree.identify_region(event.x,event.y) != 'cell': return
