@@ -70,11 +70,9 @@ STEPS = [
     {'num': 3, 'label': '目标设定',     'desc': '养护目标配置'},
     {'num': 4, 'label': '预测模型',     'desc': '衰减率与预测'},
     {'num': 5, 'label': '养护对策',     'desc': '阈值/回调/单价'},
-    {'num': 6, 'label': '需求分析',     'desc': '养护需求与排序'},
-    {'num': 7, 'label': '预算资金',     'desc': '资金优化分配'},
-    {'num': 8, 'label': '项目库',       'desc': '中长期规划'},
-    {'num': 9, 'label': '效益评估',     'desc': '评估与反馈'},
-    {'num': 10,'label': 'GIS地图',      'desc': '路况可视化地图'},
+    {'num': 6, 'label': '投资规划',     'desc': '多年效益优化'},
+    {'num': 7, 'label': '项目库',       'desc': '工程项目管理'},
+    {'num': 8, 'label': 'GIS地图',      'desc': '路况可视化'},
 ]
 
 
@@ -247,7 +245,7 @@ class App(tk.Tk):
         self.content_area.grid(row=0, column=1, sticky='nsew')
 
         # 创建10个页面的容器Frame
-        for i in range(1, 11):
+        for i in range(1, 9):
             page = tk.Frame(self.content_area, bg=THEME['bg'])
             setattr(self, f'_page{i}', page)
             # 构建对应内容
@@ -1281,58 +1279,9 @@ class App(tk.Tk):
         if path: self.demand_result_df.to_excel(path, index=False); messagebox.showinfo('成功','已导出')
 
     # ══════════════════════════════════════════════════════════════════════════
-    #  页面7: 预算资金
+    #  页面7: 项目库库
     # ══════════════════════════════════════════════════════════════════════════
     def _build_page7(self, parent):
-        self._section_title(parent, '💰 养护预算与资金优化分配')
-        self._section_sub(parent, '预算约束下的养护资金优化分配')
-
-        card = self._card(parent, '预算配置')
-        r = self._row(card)
-        tk.Label(r, text='年度预算(万元)：', bg=THEME['card'], font=('Microsoft YaHei', 10)).pack(side='left')
-        self.budget_var = tk.StringVar(value='5000')
-        ttk.Entry(r, textvariable=self.budget_var, width=10, font=('Microsoft YaHei', 10)).pack(side='left', padx=8)
-        tk.Label(r, text='分配方法：', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left', padx=(15,0))
-        self.alloc_method_var = tk.StringVar(value='优先序法')
-        ttk.Combobox(r, textvariable=self.alloc_method_var, width=12, values=['优先序法','增量分析法','多目标优化']).pack(side='left', padx=8)
-        tk.Button(r, text='▶ 执行资金分配', command=self._run_budget,
-                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 10), padx=12, cursor='hand2').pack(side='left', padx=15)
-        tk.Button(r, text='📥 导出', command=self._export_budget, font=('Microsoft YaHei', 9)).pack(side='left', padx=5)
-
-        card2 = self._card(parent, '资金分配方案', expand=True)
-        cols = ('养护类型','项目数','需求资金(万元)','分配资金(万元)','满足率(%)')
-        self.budget_tree = ttk.Treeview(card2, columns=cols, show='headings', height=5)
-        for c in cols: self.budget_tree.heading(c, text=c); self.budget_tree.column(c, width=130, anchor='center')
-        self.budget_tree.pack(fill='both', expand=True)
-        self.budget_info = tk.Label(parent, text='', bg=THEME['bg'], fg=THEME['text_light'], font=('Microsoft YaHei', 9))
-        self.budget_info.pack(anchor='w', padx=20)
-        self.budget_result = None
-
-    def _run_budget(self):
-        if self.demand_result_df is None or self.demand_result_df.empty:
-            messagebox.showwarning('提示','请先在"需求分析"中执行分析'); return
-        try:
-            from src.decision.budget_allocation import priority_allocation_by_type
-            budget = float(self.budget_var.get())
-            result = priority_allocation_by_type(self.demand_result_df, budget)
-            self.budget_result = result
-            self.budget_tree.delete(*self.budget_tree.get_children())
-            for mt in ['路面改造','预防性养护','日常养护','总计']:
-                if mt in result:
-                    r = result[mt]
-                    self.budget_tree.insert('','end',values=(mt,'-',f"{r.get('需求金额(万元)',0):.2f}",f"{r.get('分配预算(万元)',0):.2f}",f"{r.get('满足程度(%)',0):.1f}%"))
-            self.budget_info.config(text=f'方法：{self.alloc_method_var.get()} | 预算：{budget}万元')
-            self.mark_step_done(7); self.status_var.set('资金分配完成')
-        except Exception as e:
-            messagebox.showerror('错误', str(e))
-
-    def _export_budget(self):
-        self._export_tree(self.budget_tree)
-
-    # ══════════════════════════════════════════════════════════════════════════
-    #  页面8: 项目库
-    # ══════════════════════════════════════════════════════════════════════════
-    def _build_page8(self, parent):
         self._section_title(parent, '📋 养护工程项目库')
         self._section_sub(parent, '中长期养护规划：养护工程项目库管理')
 
@@ -1406,142 +1355,9 @@ class App(tk.Tk):
         messagebox.showinfo('完成', f"年度计划：{plan.get('项目数',0)}个项目 | 总费用：{plan.get('总费用(万元)',0)}万元")
 
     # ══════════════════════════════════════════════════════════════════════════
-    #  页面9: 效益评估
+    #  页面8: GIS地图
     # ══════════════════════════════════════════════════════════════════════════
-    def _build_page9(self, parent):
-        self._section_title(parent, '✅ 综合效益评估（技术+经济双维度）')
-        self._section_sub(parent, '技术达标度 + 经济效益度 → 综合评分 → 不满足则调整后重新分析')
-
-        card = self._card(parent)
-        r = self._row(card)
-        tk.Button(r, text='▶ 执行综合评估', command=self._run_benefit,
-                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 10), padx=15, cursor='hand2').pack(side='left')
-        tk.Button(r, text='📥 导出报告', command=self._export_benefit, font=('Microsoft YaHei', 9)).pack(side='left', padx=10)
-        tk.Button(r, text='⚠ 不满足？调整后重算', command=self._feedback_adjust,
-                 bg=THEME['warning'], fg='white', font=('Microsoft YaHei', 10), padx=10, cursor='hand2').pack(side='left', padx=10)
-
-        # 技术达标评估表
-        card2 = self._card(parent, '技术达标评估', expand=True)
-        cols = ('道路类型','指标','当前值','短期目标','中期目标','长期目标','达成')
-        self.benefit_tech_tree = ttk.Treeview(card2, columns=cols, show='headings', height=5)
-        for c in cols: self.benefit_tech_tree.heading(c, text=c); self.benefit_tech_tree.column(c, width=105, anchor='center')
-        self.benefit_tech_tree.pack(fill='both', expand=True)
-
-        # 经济效益评估表
-        card3 = self._card(parent, '经济效益评估', expand=True)
-        cols2 = ('道路类型','指标','当前值','目标值','达成')
-        self.benefit_econ_tree = ttk.Treeview(card3, columns=cols2, show='headings', height=5)
-        for c in cols2: self.benefit_econ_tree.heading(c, text=c); self.benefit_econ_tree.column(c, width=110, anchor='center')
-        self.benefit_econ_tree.pack(fill='both', expand=True)
-
-        # 综合评分
-        card4 = self._card(parent, '综合评分')
-        self.benefit_text = tk.Text(card4, height=6, wrap='word', font=('Consolas', 10))
-        self.benefit_text.pack(fill='both', expand=True)
-
-    def _run_benefit(self):
-        if not self.data_cache:
-            messagebox.showwarning('提示','请先加载数据'); return
-        try:
-            df_all = pd.concat(self.data_cache.values(), ignore_index=True)
-            if '年份' in df_all.columns: df_all = df_all[df_all['年份']==df_all['年份'].max()]
-            def rt(r):
-                s = str(r); return '国道' if s.startswith('G') else ('省道' if s.startswith('S') else '其他')
-            if '路线编码' in df_all.columns: df_all['道路类型'] = df_all['路线编码'].apply(rt)
-            if '路段长度km' not in df_all.columns: df_all['路段长度km'] = 1.0
-
-            from src.decision.cost_model import calc_weighted_pqi, calc_good_road_rate, calc_bcr_ratio, calc_km_cost, calc_comprehensive_score
-
-            # 技术达标表
-            self.benefit_tech_tree.delete(*self.benefit_tech_tree.get_children())
-            tech_scores = {}
-            for road in ['国道','省道']:
-                rd = df_all[df_all['道路类型']==road]
-                if rd.empty: continue
-                t = rd['路段长度km'].sum()
-                w_pqi = calc_weighted_pqi(rd)
-                gr = calc_good_road_rate(rd)
-                metrics = [('加权PQI', w_pqi, 'PQI'), ('优良路率(%)', gr, '优良路率')]
-                road_score = 0; cnt = 0
-                for metric, cur, suffix in metrics:
-                    mid_t = self.target_vars.get(f'mid_{road}_{suffix}', tk.IntVar(value=0)).get() if hasattr(self,'target_vars') else 80
-                    ok = '✓' if cur >= mid_t else '✗'
-                    if ok == '✓': cnt += 1
-                    self.benefit_tech_tree.insert('','end',values=(road,metric,f'{cur:.1f}',
-                        f'{self.target_vars.get(f"short_{road}_{suffix}",tk.IntVar(value=0)).get() if hasattr(self,"target_vars") else "-"}',
-                        f'{mid_t}',
-                        f'{self.target_vars.get(f"long_{road}_{suffix}",tk.IntVar(value=0)).get() if hasattr(self,"target_vars") else "-"}',
-                        ok))
-                tech_scores[road] = (cnt / len(metrics) * 100) if metrics else 0
-
-            # 经济效益表
-            self.benefit_econ_tree.delete(*self.benefit_econ_tree.get_children())
-            econ_scores = {}
-            for road in ['国道','省道']:
-                rd = df_all[df_all['道路类型']==road]
-                if rd.empty: continue
-                t = rd['路段长度km'].sum(); w = rd['路面宽度'].mean() if '路面宽度' in rd.columns else 7
-                est_cost = t * 1000 * w * 300 / 10000
-                bcr = calc_bcr_ratio(rd, est_cost)
-                kmc = calc_km_cost(est_cost, rd)
-                mid_bcr = self.target_vars.get(f'mid_{road}_BCR', tk.IntVar(value=150)).get()/100 if hasattr(self,'target_vars') else 1.5
-                mid_kmc = self.target_vars.get(f'mid_{road}_km成本', tk.IntVar(value=50)).get() if hasattr(self,'target_vars') else 50
-                metrics2 = [('B/C比', bcr, mid_bcr, 'higher'), ('每km成本(万)', kmc, mid_kmc, 'lower')]
-                road_econ = 0; cnt2 = 0
-                for metric, cur, target, direction in metrics2:
-                    ok = '✓' if (direction=='higher' and cur>=target) or (direction=='lower' and cur<=target) else '✗'
-                    if ok == '✓': cnt2 += 1
-                    self.benefit_econ_tree.insert('','end',values=(road,metric,f'{cur:.2f}',f'{target}',ok))
-                econ_scores[road] = (cnt2 / len(metrics2) * 100) if metrics2 else 0
-
-            # 综合评分
-            tech_avg = sum(tech_scores.values())/len(tech_scores) if tech_scores else 0
-            econ_avg = sum(econ_scores.values())/len(econ_scores) if econ_scores else 0
-            comp = calc_comprehensive_score(tech_avg, econ_avg)
-
-            self.benefit_text.delete('1.0','end')
-            self.benefit_text.insert('end', '='*50 + '\n')
-            self.benefit_text.insert('end', '  综合效益评估结果（技术+经济双维度）\n')
-            self.benefit_text.insert('end', '='*50 + '\n\n')
-            self.benefit_text.insert('end', f'  技术达标得分：{comp["技术得分"]:.1f} / 100  (权重 {int(comp["技术权重"]*100)}%)\n')
-            self.benefit_text.insert('end', f'  经济效益得分：{comp["经济得分"]:.1f} / 100  (权重 {int(comp["经济权重"]*100)}%)\n')
-            self.benefit_text.insert('end', f'  ──────────────────────\n')
-            self.benefit_text.insert('end', f'  综合得分：{comp["综合得分"]:.1f} / 100  等级：{comp["等级"]}\n')
-            self.benefit_text.insert('end', f'  建议：{comp["建议"]}\n')
-            if comp['综合得分'] < 75:
-                self.benefit_text.insert('end', '\n  ⚠ 综合得分不足，请返回调整后重新评估\n')
-            self.mark_step_done(9)
-            self.status_var.set(f'综合评估完成 — {comp["等级"]} ({comp["综合得分"]:.0f}分)')
-        except Exception as e:
-            import traceback; traceback.print_exc()
-            messagebox.showerror('错误', str(e))
-
-    def _feedback_adjust(self):
-        messagebox.showinfo('反馈调整',
-            '请按以下步骤调整：\n\n'
-            '1. 返回【3.目标设定】调整养护目标\n'
-            '2. 返回【5.养护对策】调整触发阈值或单价\n'
-            '3. 重新运行【6.需求分析】\n'
-            '4. 重新运行【7.预算资金】\n'
-            '5. 重新导入【8.项目库】\n'
-            '6. 再次执行【9.效益评估】\n')
-        self._switch_step(3)
-
-    def _export_benefit(self):
-        # 导出技术+经济两份表到一个Excel
-        path = filedialog.asksaveasfilename(defaultextension='.xlsx', filetypes=[('Excel','*.xlsx')], initialfile='综合评估.xlsx')
-        if not path: return
-        with pd.ExcelWriter(path) as writer:
-            for prefix, tree in [('技术评估', self.benefit_tech_tree), ('经济评估', self.benefit_econ_tree)]:
-                rows = [tree.item(it,'values') for it in tree.get_children()]
-                if rows:
-                    pd.DataFrame(rows, columns=tree['columns']).to_excel(writer, sheet_name=prefix, index=False)
-        messagebox.showinfo('成功','综合评估报告已导出')
-
-    # ══════════════════════════════════════════════════════════════════════════
-    #  页面10: GIS地图
-    # ══════════════════════════════════════════════════════════════════════════
-    def _build_page10(self, parent):
+    def _build_page8(self, parent):
         self._section_title(parent, '🌍 GIS地图展示')
         self._section_sub(parent, '基于Folium交互式地图，按PQI/PCI/RQI着色展示路况')
 
