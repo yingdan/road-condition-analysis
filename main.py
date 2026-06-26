@@ -1347,10 +1347,39 @@ class App(tk.Tk):
     #  页面7: 项目库库
     # ══════════════════════════════════════════════════════════════════════════
     def _build_page7(self, parent):
-        self._section_title(parent, '📋 养护工程项目库')
-        self._section_sub(parent, '中长期养护规划：养护工程项目库管理')
+        self._section_title(parent, '📊 投资规划')
+        self._section_sub(parent, '经济指标 + 多年动态优化 + 项目库管理')
 
-        card = self._card(parent)
+        # 经济指标面板
+        card_econ = self._card(parent)
+        r_econ = self._row(card_econ)
+        tk.Button(r_econ, text='计算经济指标', command=self._run_invest_econ, bg=THEME['accent'],
+                 fg='white', font=('Microsoft YaHei',9), padx=10).pack(side='left')
+        cols_econ = ('道路类型','加权PQI','优良路率','交通量','路龄','年养护费(万)','每km成本','B/C','单位PQI提升','LCC-NPV(万)')
+        self.benefit_tree = ttk.Treeview(card_econ, columns=cols_econ, show='headings', height=4)
+        for ct in cols_econ: self.benefit_tree.heading(ct, text=ct); self.benefit_tree.column(ct, width=92, anchor='center')
+        self.benefit_tree.pack(fill='both', expand=True, pady=(5,0))
+
+        # 多年动态优化
+        card_opt = self._card(parent, '多年动态优化')
+        c1 = self._row(card_opt)
+        tk.Label(c1, text='规划年限：', bg=THEME['card'], font=('Microsoft YaHei',9)).pack(side='left')
+        self.dp_years_var = tk.IntVar(value=5)
+        ttk.Entry(c1, textvariable=self.dp_years_var, width=5).pack(side='left', padx=(0,15))
+        tk.Label(c1, text='年预算(万元)：', bg=THEME['card'], font=('Microsoft YaHei',9)).pack(side='left')
+        self.budget_var = tk.IntVar(value=5000)
+        ttk.Entry(c1, textvariable=self.budget_var, width=10).pack(side='left', padx=5)
+        tk.Scale(c1, from_=500, to=20000, resolution=100, orient='horizontal',
+                variable=self.budget_var, length=200, showvalue=False).pack(side='left', padx=5)
+        tk.Button(c1, text='执行优化', command=self._run_dynamic_planning,
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei',10), padx=12, cursor='hand2').pack(side='right')
+        cols_dp = ('年份','年初PQI','改造里程(km)','投入(万元)','优良路率(%)','累计效益(万元)')
+        self.dp_tree = ttk.Treeview(card_opt, columns=cols_dp, show='headings', height=6)
+        for ct in cols_dp: self.dp_tree.heading(ct, text=ct); self.dp_tree.column(ct, width=130, anchor='center')
+        self.dp_tree.pack(fill='both', expand=True, pady=(5,0))
+
+        # 项目库
+        card = self._card(parent, '工程项目库')
         r = self._row(card)
         tk.Button(r, text='📥 从需求导入', command=self._pool_import_demand,
                  bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9), padx=10, cursor='hand2').pack(side='left', padx=3)
@@ -1368,6 +1397,65 @@ class App(tk.Tk):
         self.pool_tree.configure(yscrollcommand=sv.set)
         self.pool_tree.pack(side='left', fill='both', expand=True)
         sv.pack(side='right', fill='y')
+
+    def _run_invest_econ(self):
+        df = self._get_data('全部')
+        if df.empty: return
+        if '年份' in df.columns: df = df[df['年份']==df['年份'].max()]
+        if '路段长度km' not in df.columns: df['路段长度km'] = 1.0
+        def rt(r):
+            s = str(r); return '国道' if s.startswith('G') else ('省道' if s.startswith('S') else '其他')
+        if '路线编码' in df.columns: df['道路类型'] = df['路线编码'].apply(rt)
+        from src.decision.cost_model import calc_weighted_pqi, calc_good_road_rate, calc_bcr_ratio, calc_unit_pqi_cost, calc_km_cost, calc_lcc
+        self.benefit_tree.delete(*self.benefit_tree.get_children())
+        for road in ['国道','省道']:
+            rd = df[df['道路类型']==road]
+            if rd.empty: continue
+            t = rd['路段长度km'].sum(); w = rd['路面宽度'].mean() if '路面宽度' in rd.columns else 7
+            avg_unit = 30*0.8 + 160*0.15 + 319*0.05
+            ac = t * 1000 * w * avg_unit / 10000
+            self.benefit_tree.insert('','end',values=(road, f'{calc_weighted_pqi(rd):.1f}', f'{calc_good_road_rate(rd):.1f}%',
+                int(rd['交通量'].mean()) if '交通量' in rd.columns else 5000,
+                f'{rd["路龄"].mean():.1f}' if '路龄' in rd.columns else '5.0',
+                f'{ac:.0f}', f'{calc_km_cost(ac,rd):.1f}', f'{calc_bcr_ratio(rd,ac):.2f}',
+                f'{calc_unit_pqi_cost(rd,ac):.2f}', f'{calc_lcc(rd)["NPV(万元)"]:.0f}'))
+        self.status_var.set('经济指标计算完成')
+
+    def _run_dynamic_planning(self):
+        df = self._get_data('全部')
+        if df.empty: return
+        import numpy as np
+        if '年份' in df.columns: df = df[df['年份']==df['年份'].max()]
+        for col in ['路段长度km','交通量','车道数','路面宽度','PQI']:
+            dv = {'路段长度km':1,'交通量':5000,'车道数':2,'路面宽度':7,'PQI':80}[col]
+            if col not in df.columns: df[col] = dv
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(dv)
+        years = self.dp_years_var.get(); budget = self.budget_var.get(); k = 0.015
+        segs = df; total_km = segs['路段长度km'].sum()
+        pqi_arr = segs['PQI'].values.copy()
+        pm = {v: i for i, v in enumerate(segs.index)}
+        self.dp_tree.delete(*self.dp_tree.get_children())
+        cum_b = 0; init_pqi = pqi_arr.mean()
+        for yr in range(1, years+1):
+            pqi_arr = pqi_arr * np.exp(-k)
+            need = pqi_arr < 80; rkm = 0; remain = budget
+            if need.sum() > 0:
+                m = segs[need].copy()
+                dp = pqi_arr[need]
+                m['cost'] = m['路段长度km'] * 1000 * m['路面宽度'] * 319 / 10000
+                m['benefit'] = m['交通量'] * 365 * m['路段长度km'] * (92-dp) * 0.015 * m['车道数'] / 10000
+                m['bcr'] = m['benefit'] / m['cost']
+                m = m.sort_values('bcr', ascending=False)
+                for df_idx, row in m.iterrows():
+                    if row['cost'] <= remain:
+                        remain -= row['cost']; rkm += row['路段长度km']
+                        ap = pm.get(df_idx, -1)
+                        if ap >= 0: pqi_arr[ap] = 92
+                        cum_b += row['benefit'] / 1.05 ** yr
+            wp = (pqi_arr * segs['路段长度km'].values).sum() / total_km
+            gr = segs['路段长度km'].values[pqi_arr>=80].sum() / total_km * 100
+            self.dp_tree.insert('','end',values=(f'{yr}年',f'{wp:.1f}',f'{rkm:.1f}',f'{budget:.0f}',f'{gr:.1f}%',f'{cum_b:.0f}'))
+        self.status_var.set(f'动态规划完成 - {years}年')
 
     def _pool_refresh(self):
         self.pool_tree.delete(*self.pool_tree.get_children())
@@ -1415,7 +1503,7 @@ class App(tk.Tk):
         from src.decision.project_pool import generate_annual_plan
         if not self.project_pool or not self.project_pool.projects:
             messagebox.showwarning('提示','项目库为空'); return
-        plan = generate_annual_plan(self.project_pool, 2026, float(self.budget_var.get()))
+        plan = generate_annual_plan(self.project_pool, 2026, self.budget_var.get())
         self._pool_refresh()
         messagebox.showinfo('完成', f"年度计划：{plan.get('项目数',0)}个项目 | 总费用：{plan.get('总费用(万元)',0)}万元")
 
