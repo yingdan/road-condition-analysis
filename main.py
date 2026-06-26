@@ -1122,22 +1122,39 @@ class App(tk.Tk):
                 v = tk.IntVar(value=dv); self.callback_vars[f'{m}_{pt}_{idx}'] = v
                 ttk.Entry(r, textvariable=v, width=8).pack(side='left')
 
-        # 三、单价
-        card3 = self._card(sf, '三、养护方案单价 — 用户自定义')
+        # 三、养护方案单价明细表（双击单价可编辑）
+        card3 = ttk.LabelFrame(sf, text='三、养护方案单价明细', padding=8)
+        card3.pack(fill='x', padx=10, pady=5)
+        cols_p = ('路面类型','养护工程','技术等级','养护方案','单价')
+        self.price_tree = ttk.Treeview(card3, columns=cols_p, show='headings', height=15)
+        for ct,w in [('路面类型',70),('养护工程',80),('技术等级',70),('养护方案',320),('单价',70)]:
+            self.price_tree.heading(ct, text=ct); self.price_tree.column(ct, width=w, anchor='w' if ct=='养护方案' else 'center')
+        sv_p = ttk.Scrollbar(card3, orient='vertical', command=self.price_tree.yview)
+        self.price_tree.configure(yscrollcommand=sv_p.set)
+        self.price_tree.pack(side='left', fill='both', expand=True); sv_p.pack(side='right', fill='y')
         self.price_vars = {}
-        h4 = self._row(card3, 3)
-        for t,w in [('养护类型',12),('路面类型',10),('单价(元/m²)',12)]:
-            tk.Label(h4, text=t, width=w, bg=THEME['card'], font=('Microsoft YaHei',8,'bold')).pack(side='left')
-        for m,pt,dp in [
-            ('路面改造','沥青路面',319),('路面改造','水泥路面',299),
-            ('预防性养护','沥青路面',160),('预防性养护','水泥路面',140),
-            ('日常养护','沥青路面',30),('日常养护','水泥路面',25),
+        for pt,mt,tg,plan,price in [
+            ('沥青路面','结构性修复','一级','4cm GAC-13(改性)+6cm GAC-20(改性)+1cm同步碎石封层+基层处理(30%)',326),
+            ('沥青路面','结构性修复','二级','4cm GAC-13(改性)+6cm GAC-20+1cm同步碎石封层+基层处理(30%)',319),
+            ('沥青路面','结构性修复','三级','4cm GAC-13(改性)+6cm GAC-20+1cm同步碎石封层+基层处理(30%)',319),
+            ('沥青路面','功能性修复','一级','5cm GAC-13(改性)+1cm同步碎石封层+病害处理(10%)',161),
+            ('沥青路面','功能性修复','二级','4cm GAC-13(改性)+改性乳化沥青粘层+病害处理(10%)',109),
+            ('沥青路面','功能性修复','三级','4cm GAC-13(改性)+改性乳化沥青粘层+病害处理(10%)',109),
+            ('沥青路面','预防养护','一级','1.2cm冷拌超粘微表处+表层病害处理(5%)',48),
+            ('沥青路面','预防养护','二级','1.2cm冷拌超粘微表处+表层病害处理(5%)',30),
+            ('沥青路面','预防养护','三级','1cm微表处+表层病害处理(5%)',30),
+            ('水泥路面','结构性修复','一级','水泥:碎石化+封层+C40砼32cm / 沥青:共振+封层+10cmGAC25+6cmGAC20+4cmGAC13',268),
+            ('水泥路面','结构性修复','二级','水泥:碎石化+封层+C40砼30cm / 沥青:共振+封层+10cmGAC25+4cmGAC13',253),
+            ('水泥路面','结构性修复','三级','水泥:碎石化+封层+C40砼28cm / 沥青:共振+封层+8cmGAC25+4cmGAC13',238),
+            ('水泥路面','功能性修复','一级','6cm GAC-13(改性)(含1cm调平)+1cm同步碎石封层+换板(10%)',161),
+            ('水泥路面','功能性修复','二级','6cm GAC-13(改性)(含1cm调平)+1cm同步碎石封层+换板(10%)',160),
+            ('水泥路面','功能性修复','三级','6cm GAC-13(改性)(含1cm调平)+1cm同步碎石封层+换板(10%)',157),
+            ('沥青路面','日常养护','全部','日常保养维护',30),
+            ('水泥路面','日常养护','全部','日常保养维护',25),
         ]:
-            r = self._row(card3, 2)
-            tk.Label(r, text=m, width=12, bg=THEME['card']).pack(side='left')
-            tk.Label(r, text=pt, width=10, bg=THEME['card']).pack(side='left')
-            v = tk.IntVar(value=dp); self.price_vars[f'{m}_{pt}'] = v
-            ttk.Entry(r, textvariable=v, width=10).pack(side='left')
+            self.price_tree.insert('','end',values=(pt,mt,tg,plan,str(price)))
+            self.price_vars[f'{mt}_{pt}_{tg}'] = tk.IntVar(value=price)
+        self.price_tree.bind('<Double-1>', self._on_price_dclick)
 
         # 按钮
         r = self._row(sf, 15)
@@ -1146,6 +1163,29 @@ class App(tk.Tk):
                  padx=18, pady=4, cursor='hand2').pack(side='left', padx=20)
         tk.Button(r, text='↺ 恢复默认', command=self._reset_policy_config,
                  font=('Microsoft YaHei', 9), padx=12).pack(side='left', padx=5)
+
+    def _on_price_dclick(self, event):
+        if self.price_tree.identify_region(event.x,event.y) != 'cell': return
+        if self.price_tree.identify_column(event.x) != '#5': return
+        item = self.price_tree.identify_row(event.y)
+        if not item: return
+        vals = self.price_tree.item(item,'values')
+        bbox = self.price_tree.bbox(item,'#5')
+        if not bbox: return
+        e = ttk.Entry(self.price_tree, width=8)
+        e.place(x=bbox[0], y=bbox[1], width=bbox[2], height=bbox[3])
+        e.insert(0,''.join(c for c in str(vals[4]) if c.isdigit()))
+        e.select_range(0,'end'); e.focus_set()
+        def save(ev=None):
+            e.destroy()
+            nv = e.get().strip()
+            if nv and nv.isdigit():
+                nv2 = list(vals); nv2[4] = nv
+                self.price_tree.item(item,values=nv2)
+                pt,mt,tg = vals[0],vals[1],vals[2]
+                for pk in [f'{mt}_{pt}_{tg}']:
+                    if pk in self.price_vars: self.price_vars[pk].set(int(nv))
+        e.bind('<Return>',save); e.bind('<FocusOut>',save)
 
     def _save_policy_config(self):
         cfg = self.config
