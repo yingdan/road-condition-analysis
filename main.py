@@ -68,11 +68,10 @@ STEPS = [
     {'num': 1, 'label': '数据管理',     'desc': '加载和筛选数据'},
     {'num': 2, 'label': '现状评定',     'desc': '技术状况评价'},
     {'num': 3, 'label': '目标设定',     'desc': '养护目标配置'},
-    {'num': 4, 'label': '预测模型',     'desc': '衰减率与预测'},
-    {'num': 5, 'label': '对策模型',     'desc': '衰减/阈值/单价'},
-    {'num': 6, 'label': '投资规划',     'desc': '多年效益优化'},
-    {'num': 7, 'label': '投资规划',     'desc': '经济与优化'},
-    {'num': 8, 'label': 'GIS地图',      'desc': '路况可视化'},
+    {'num': 4, 'label': '对策模型',     'desc': '衰减/阈值/单价'},
+    {'num': 5, 'label': '需求分析',     'desc': '预测/需求/计划'},
+    {'num': 6, 'label': '投资规划',     'desc': '经济与优化'},
+    {'num': 7, 'label': 'GIS地图',      'desc': '路况可视化'},
 ]
 
 
@@ -245,7 +244,7 @@ class App(tk.Tk):
         self.content_area.grid(row=0, column=1, sticky='nsew')
 
         # 创建10个页面的容器Frame
-        for i in range(1, 9):
+        for i in range(1, 8):
             page = tk.Frame(self.content_area, bg=THEME['bg'])
             setattr(self, f'_page{i}', page)
             # 构建对应内容
@@ -987,31 +986,7 @@ class App(tk.Tk):
         self.status_var.set('目标对比完成')
 
     # ══════════════════════════════════════════════════════════════════════════
-    #  页面4: 预测模型
-    # ══════════════════════════════════════════════════════════════════════════
     def _build_page4(self, parent):
-        self._section_title(parent, '📈 性能预测（已整合）')
-        self._section_sub(parent, '衰减率标定、5年预测、养护计划已整合至第5页「对策模型」和第6页「需求分析」')
-        card = self._card(parent)
-        tk.Label(card, text='请前往：', bg=THEME['card'], font=('Microsoft YaHei', 12)).pack(anchor='w', pady=5)
-        tk.Label(card, text='  · 第5页「对策模型」→ 衰减率标定', bg=THEME['card'], fg=THEME['accent'],
-                font=('Microsoft YaHei', 11)).pack(anchor='w', pady=3)
-        tk.Label(card, text='  · 第6页「需求分析」→ 5年PQI预测 + 养护计划计算', bg=THEME['card'], fg=THEME['accent'],
-                font=('Microsoft YaHei', 11)).pack(anchor='w', pady=3)
-        tk.Button(card, text='跳转到对策模型 (Tab 5)', command=lambda: self._switch_step(5),
-                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 12), padx=20, pady=5).pack(pady=15)
-
-    def _calc_decay(self):
-        pass
-    def _gen_prediction(self):
-        pass
-    def _calc_maint_plan(self):
-        pass
-
-    # ══════════════════════════════════════════════════════════════════════════
-    #  页面5: 养护对策
-    # ══════════════════════════════════════════════════════════════════════════
-    def _build_page5(self, parent):
         # 可滚动
         cvs = tk.Canvas(parent, bg=THEME['bg'], highlightthickness=0)
         vsb = ttk.Scrollbar(parent, orient='vertical', command=cvs.yview)
@@ -1217,9 +1192,9 @@ class App(tk.Tk):
         self.status_var.set('已恢复默认配置')
 
     # ══════════════════════════════════════════════════════════════════════════
-    #  页面6: 需求分析
+    #  页面5: 需求分析
     # ══════════════════════════════════════════════════════════════════════════
-    def _build_page6(self, parent):
+    def _build_page5(self, parent):
         self._section_title(parent, '🔍 养护需求分析')
         self._section_sub(parent, '基于预测模型和养护对策，分析路网养护需求并排序')
 
@@ -1302,9 +1277,9 @@ class App(tk.Tk):
         if path: self.demand_result_df.to_excel(path, index=False); messagebox.showinfo('成功','已导出')
 
     # ══════════════════════════════════════════════════════════════════════════
-    #  页面7: 项目库库
+    #  页面6: 项目库库
     # ══════════════════════════════════════════════════════════════════════════
-    def _build_page7(self, parent):
+    def _build_page6(self, parent):
         self._section_title(parent, '📊 投资规划')
         self._section_sub(parent, '经济指标 + 多年动态优化 + 项目库管理')
 
@@ -1466,9 +1441,9 @@ class App(tk.Tk):
         messagebox.showinfo('完成', f"年度计划：{plan.get('项目数',0)}个项目 | 总费用：{plan.get('总费用(万元)',0)}万元")
 
     # ══════════════════════════════════════════════════════════════════════════
-    #  页面8: GIS地图
+    #  页面7: GIS地图
     # ══════════════════════════════════════════════════════════════════════════
-    def _build_page8(self, parent):
+    def _build_page7(self, parent):
         self._section_title(parent, '🌍 GIS地图展示')
         self._section_sub(parent, '基于Folium交互式地图，按PQI/PCI/RQI着色展示路况')
 
