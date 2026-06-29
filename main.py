@@ -844,7 +844,7 @@ class App(tk.Tk):
     # ══════════════════════════════════════════════════════════════════════════
     def _build_page3(self, parent):
         self._section_title(parent, '🎯 养护目标设定')
-        self._section_sub(parent, '技术指标(加权PQI+优良路率) + 经济指标(B/C+成本+ROI) — 短期/中期/长期')
+        self._section_sub(parent, '技术目标(加权PQI+优良路率) — 短期/中期/长期 | B/C和成本为参考值')
 
         self.target_vars = {}
         horizons = [
@@ -877,8 +877,8 @@ class App(tk.Tk):
                 tk.Label(grd, text=f'{label} ', bg=self._bg(gd), font=('Microsoft YaHei',9)).pack(side='left')
                 v = tk.IntVar(value=dv); self.target_vars[f'{hkey}_国道_{suffix}'] = v
                 ttk.Entry(grd, textvariable=v, width=5, font=('Microsoft YaHei',9)).pack(side='left', padx=(0,8))
-            tk.Label(grd, text='经济→', bg=self._bg(gd), fg=THEME['success'],
-                    font=('Microsoft YaHei',8,'bold')).pack(side='left', padx=(5,5))
+            tk.Label(grd, text='参考→', bg=self._bg(gd), fg=THEME['text_light'],
+                    font=('Microsoft YaHei',8)).pack(side='left', padx=(5,5))
             for label, suffix, dv in [('B/C','BCR',default_targets[hkey]['国道_BCR']),
                                        ('成本万/km','km成本',default_targets[hkey]['国道_km成本'])]:
                 tk.Label(grd, text=f'{label} ', bg=self._bg(gd), font=('Microsoft YaHei',9)).pack(side='left')
@@ -900,8 +900,8 @@ class App(tk.Tk):
                 tk.Label(srd, text=f'{label} ', bg=self._bg(sd), font=('Microsoft YaHei',9)).pack(side='left')
                 v = tk.IntVar(value=dv); self.target_vars[f'{hkey}_省道_{suffix}'] = v
                 ttk.Entry(srd, textvariable=v, width=5, font=('Microsoft YaHei',9)).pack(side='left', padx=(0,8))
-            tk.Label(srd, text='经济→', bg=self._bg(sd), fg=THEME['success'],
-                    font=('Microsoft YaHei',8,'bold')).pack(side='left', padx=(5,5))
+            tk.Label(srd, text='参考→', bg=self._bg(sd), fg=THEME['text_light'],
+                    font=('Microsoft YaHei',8)).pack(side='left', padx=(5,5))
             for label, suffix, dv in [('B/C','BCR',default_targets[hkey]['省道_BCR']),
                                        ('成本万/km','km成本',default_targets[hkey]['省道_km成本'])]:
                 tk.Label(srd, text=f'{label} ', bg=self._bg(sd), font=('Microsoft YaHei',9)).pack(side='left')
@@ -967,21 +967,24 @@ class App(tk.Tk):
             from src.decision.cost_model import calc_bcr_ratio
             bcr = calc_bcr_ratio(rd, annual_cost) if annual_cost>0 else 0
 
-            for metric, cur_val, suffix in [
-                ('加权PQI', w_pqi, 'PQI'), ('优良路率(%)', good_rate, '优良路率'),
-                ('B/C比', bcr, 'BCR'), ('每km成本(万)', km_cost, 'km成本')
+            for metric, cur_val, suffix, is_target in [
+                ('加权PQI', w_pqi, 'PQI', True), ('优良路率(%)', good_rate, '优良路率', True),
+                ('B/C比(参考)', bcr, 'BCR', False), ('每km成本(万,参考)', km_cost, 'km成本', False)
             ]:
-                short_t = self.target_vars.get(f'short_{road}_{suffix}', tk.IntVar(value=0)).get()
-                mid_t   = self.target_vars.get(f'mid_{road}_{suffix}', tk.IntVar(value=0)).get()
-                long_t  = self.target_vars.get(f'long_{road}_{suffix}', tk.IntVar(value=0)).get()
-                # B/C值直接显示（StringVar存储）
-                if suffix == 'BCR':
-                    cur_fmt = f'{cur_val:.2f}'
-                    s_fmt = f'{float(short_t):.2f}'
-                    m_fmt = f'{float(mid_t):.2f}'
-                    l_fmt = f'{float(long_t):.2f}'
+                if is_target:
+                    short_t = self.target_vars.get(f'short_{road}_{suffix}', tk.IntVar(value=0)).get()
+                    mid_t   = self.target_vars.get(f'mid_{road}_{suffix}', tk.IntVar(value=0)).get()
+                    long_t  = self.target_vars.get(f'long_{road}_{suffix}', tk.IntVar(value=0)).get()
+                    if suffix == 'BCR':
+                        cur_fmt = f'{cur_val:.2f}'
+                        s_fmt = f'{float(short_t):.2f}'
+                        m_fmt = f'{float(mid_t):.2f}'
+                        l_fmt = f'{float(long_t):.2f}'
+                    else:
+                        cur_fmt = f'{cur_val:.1f}'; s_fmt = f'{short_t}'; m_fmt = f'{mid_t}'; l_fmt = f'{long_t}'
                 else:
-                    cur_fmt = f'{cur_val:.1f}'; s_fmt = f'{short_t}'; m_fmt = f'{mid_t}'; l_fmt = f'{long_t}'
+                    cur_fmt = f'{cur_val:.2f}' if suffix == 'BCR' else f'{cur_val:.1f}'
+                    s_fmt = m_fmt = l_fmt = '参考'
                 self.target_tree.insert('','end',values=('技术/经济',road,metric,cur_fmt,s_fmt,m_fmt,l_fmt))
         self.status_var.set('目标对比完成')
 
