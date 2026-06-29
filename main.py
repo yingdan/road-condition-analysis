@@ -1554,18 +1554,21 @@ class App(tk.Tk):
             results.append((info['name'], f'PQI≥{target_pqi}', f'{total_budget:.0f}', f'{total_natural:.0f}',
                            f'{int(yr_details[0][0])}', pct_str, f'{final_pqi:.1f}', f'{gr:.1f}%', ok))
 
-        # 输出表
-        cols = ('目标','要求','推荐总预算','自然总需求','首年预算','年度权重(数据驱动)','终PQI','优良路率','达标')
-        self.dp_tree['columns'] = cols
-        for c in cols: self.dp_tree.heading(c, text=c); self.dp_tree.column(c, width=115, anchor='center')
-        for r in results: self.dp_tree.insert('','end',values=r)
-
-        self.dp_text.insert('end','由数据驱动的总量优化：\n')
-        self.dp_text.insert('end','第一步：无预算限制运行→记录每年自然产生的PQI<80路段修复费用\n')
-        self.dp_text.insert('end','第二步：自然年度费用分布=最优分配比例（数据驱动，非固定值）\n')
-        self.dp_text.insert('end','第三步：总需求×85%压缩→按自然比例分配各年→模拟达标情况\n')
-        self.dp_text.insert('end','\n典型结果：前几年比例高（差路段集中修复），后几年比例低（趋于稳定维护）\n')
-        self.status_var.set('数据驱动的总量优化完成')
+        # 输出结果到文本区（避免Treeview列冲突）
+        self.dp_text.delete('1.0','end')
+        self.dp_text.insert('end','═════════════════════════════════════\n')
+        self.dp_text.insert('end','  数据驱动总量优化（短/中/长期）\n')
+        self.dp_text.insert('end','═════════════════════════════════════\n\n')
+        sep = f'{"目标":<12}{"PQI要求":<8}{"推荐总预算":<14}{"自然需求":<14}{"首年预算":<12}{"终PQI":<8}{"优良路率":<10}{"达标"}\n'
+        self.dp_text.insert('end', sep)
+        for r in results:
+            self.dp_text.insert('end', f'{r[0]:<12}{r[1]:<8}{r[2]:<14}{r[3]:<14}{r[4]:<12}{r[6]:<8}{r[7]:<10}{r[8]}\n')
+        self.dp_text.insert('end','\n── 算法说明 ──\n')
+        self.dp_text.insert('end','第一步：不限制预算，每年修复全部PQI<80路段\n')
+        self.dp_text.insert('end','第二步：记录各年自然费用 → 得到数据驱动的分配比例\n')
+        self.dp_text.insert('end','第三步：总需求×85%压缩后按自然比例分配各年\n')
+        self.dp_text.insert('end',f'结果：前几年比例高(差路段多)，后几年比例低(趋于稳定)。\n')
+        self.status_var.set('总量优化完成')
 
     def _pool_refresh(self):
         self.pool_tree.delete(*self.pool_tree.get_children())
