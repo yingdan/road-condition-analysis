@@ -1373,25 +1373,41 @@ class App(tk.Tk):
                 f'{calc_unit_pqi_cost(rd,ac):.2f}', f'{calc_lcc(rd)["NPV(万元)"]:.0f}'))
         self.status_var.set('经济指标计算完成')
 
+    def _calc_seg_decay(self, segs):
+        """计算逐路段衰减系数 k = 0.015 × 路龄因子 × 交通量因子"""
+        import numpy as np
+        k_base = 0.015
+        age = segs['路龄'].values if '路龄' in segs.columns else np.full(len(segs), 5.0)
+        aadt = segs['交通量'].values if '交通量' in segs.columns else np.full(len(segs), 5000.0)
+        age = np.nan_to_num(age.astype(float), nan=5.0)
+        aadt = np.nan_to_num(aadt.astype(float), nan=5000.0)
+        age_factor = 1 + (age - 5) * 0.03
+        traffic_factor = 1 + (aadt / 5000 - 1) * 0.25
+        age_factor = np.clip(age_factor, 0.5, 2.0)
+        traffic_factor = np.clip(traffic_factor, 0.5, 2.0)
+        k_arr = k_base * age_factor * traffic_factor
+        return np.clip(k_arr, 0.005, 0.05)
+
     def _run_dynamic_planning(self):
         df = self._get_data('全部')
         if df.empty: return
         import numpy as np
         if '年份' in df.columns: df = df[df['年份']==df['年份'].max()]
-        for col in ['路段长度km','交通量','车道数','路面宽度','PQI']:
-            dv = {'路段长度km':1,'交通量':5000,'车道数':2,'路面宽度':7,'PQI':80}[col]
+        for col in ['路段长度km','交通量','车道数','路面宽度','PQI','路龄']:
+            dv = {'路段长度km':1,'交通量':5000,'车道数':2,'路面宽度':7,'PQI':80,'路龄':5}[col]
             if col not in df.columns: df[col] = dv
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(dv)
         years = self.dp_years_var.get(); base_budget = self.budget_var.get()
-        growth = self.dp_growth_var.get() / 100; k = 0.015
+        growth = self.dp_growth_var.get() / 100
         segs = df; total_km = segs['路段长度km'].sum()
+        k_arr = self._calc_seg_decay(segs)  # 逐路段衰减系数
         pqi_arr = segs['PQI'].values.copy()
         pm = {v: i for i, v in enumerate(segs.index)}
         self.dp_tree.delete(*self.dp_tree.get_children())
         cum_b = 0; init_pqi = pqi_arr.mean()
         for yr in range(1, years+1):
             budget = int(base_budget * (1 + growth) ** (yr - 1))
-            pqi_arr = pqi_arr * np.exp(-k)
+            pqi_arr = pqi_arr * np.exp(-k_arr)  # 逐路段衰减
             need = pqi_arr < 80; needed_km = segs['路段长度km'].values[need].sum()
             rkm = 0; remain = budget
             if need.sum() > 0:
@@ -1418,12 +1434,13 @@ class App(tk.Tk):
         if df.empty: return
         import numpy as np
         if '年份' in df.columns: df = df[df['年份']==df['年份'].max()]
-        for col in ['路段长度km','交通量','车道数','路面宽度','PQI']:
-            dv = {'路段长度km':1,'交通量':5000,'车道数':2,'路面宽度':7,'PQI':80}[col]
+        for col in ['路段长度km','交通量','车道数','路面宽度','PQI','路龄']:
+            dv = {'路段长度km':1,'交通量':5000,'车道数':2,'路面宽度':7,'PQI':80,'路龄':5}[col]
             if col not in df.columns: df[col] = dv
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(dv)
-        years = self.dp_years_var.get(); k = 0.015
-        segs = df; total_km = segs['路段长度km'].sum()
+        years = self.dp_years_var.get()
+        k_arr = self._calc_seg_decay(segs := df)
+        total_km = segs['路段长度km'].sum()
         init_pqi = (segs['PQI'] * segs['路段长度km']).sum() / total_km
         target_pqi = 92
         if hasattr(self,'target_vars') and 'mid_国道_PQI' in self.target_vars:
@@ -1438,7 +1455,7 @@ class App(tk.Tk):
             pm = {v: i for i, v in enumerate(segs.index)}
             cum_b = 0
             for yr in range(1, years+1):
-                pqi_arr = pqi_arr * np.exp(-k)
+                pqi_arr = pqi_arr * np.exp(-k_arr)
                 need = pqi_arr < 80; remain = bud
                 if need.sum() > 0:
                     m = segs[need].copy()
@@ -1476,11 +1493,11 @@ class App(tk.Tk):
         if df.empty: return
         import numpy as np
         if '年份' in df.columns: df = df[df['年份']==df['年份'].max()]
-        for col in ['路段长度km','交通量','车道数','路面宽度','PQI']:
-            dv = {'路段长度km':1,'交通量':5000,'车道数':2,'路面宽度':7,'PQI':80}[col]
+        for col in ['路段长度km','交通量','车道数','路面宽度','PQI','路龄']:
+            dv = {'路段长度km':1,'交通量':5000,'车道数':2,'路面宽度':7,'PQI':80,'路龄':5}[col]
             if col not in df.columns: df[col] = dv
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(dv)
-        k = 0.015; segs = df; total_km = segs['路段长度km'].sum()
+        k_arr = self._calc_seg_decay(df); segs = df; total_km = segs['路段长度km'].sum()
         pm = {v: i for i, v in enumerate(segs.index)}
 
         targets = {}
@@ -1500,7 +1517,7 @@ class App(tk.Tk):
             yearly_natural = []   # 每年的自然需求(万元)
 
             for yr in range(1, years+1):
-                pqi_arr = pqi_arr * np.exp(-k)
+                pqi_arr = pqi_arr * np.exp(-k_arr)
                 need_mask = (pqi_arr < 80)
                 need_positions = np.where(need_mask)[0]
                 if len(need_positions) > 0:
@@ -1527,7 +1544,7 @@ class App(tk.Tk):
 
             for yr in range(1, years+1):
                 yr_budget = total_budget * weights[yr-1]
-                pqi_arr2 = pqi_arr2 * np.exp(-k)
+                pqi_arr2 = pqi_arr2 * np.exp(-k_arr)
                 need = pqi_arr2 < 80; rkm = 0; remain = yr_budget
                 if need.sum() > 0:
                     m = segs[need].copy()
