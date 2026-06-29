@@ -1498,21 +1498,17 @@ class App(tk.Tk):
             # 第一步：不限制预算，每年修复全部PQI<80路段，记录自然年度需求
             pqi_arr = segs['PQI'].values.copy()
             yearly_natural = []   # 每年的自然需求(万元)
-            repaired_set = set()
 
             for yr in range(1, years+1):
                 pqi_arr = pqi_arr * np.exp(-k)
                 need_mask = (pqi_arr < 80)
-                need_indices = [i for i in np.where(need_mask)[0] if i not in repaired_set]
-                if need_indices:
-                    idx_arr = np.array(need_indices)
-                    m = segs.iloc[idx_arr]
+                need_positions = np.where(need_mask)[0]
+                if len(need_positions) > 0:
+                    m = segs.iloc[need_positions]
                     yr_cost = (m['路段长度km'] * 1000 * m['路面宽度'] * 319 / 10000).sum()
                     yearly_natural.append(yr_cost)
-                    for idx in need_indices:
-                        repaired_set.add(idx)
-                        ap = pm.get(segs.index[idx], -1)
-                        if ap >= 0: pqi_arr[ap] = 92
+                    # 修复：PQI回调到92（允许后续年份再次衰减触发）
+                    pqi_arr[need_positions] = 92
                 else:
                     yearly_natural.append(0)
 
