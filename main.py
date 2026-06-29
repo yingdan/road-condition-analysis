@@ -386,10 +386,10 @@ class App(tk.Tk):
         self.filter_stats.pack(side='left', padx=15)
 
         # 数据表格
-        cols = ('路线编码','路段起点','路段终点','路段长度km','路面类型','技术等级','PQI','PCI','RQI','PQI分级','年份','县份','交通量','车道数')
+        cols = ('路线编码','路段起点','路段终点','路段长度km','路面类型','技术等级','PQI','PCI','RQI','PQI分级','年份','县份','交通量','车道数','路龄')
         tvf = tk.Frame(sf, bg=THEME['bg']); tvf.pack(fill='both', expand=True, padx=20, pady=5)
         self.data_tree = ttk.Treeview(tvf, columns=cols, show='headings', height=14)
-        ws = {'路线编码':75,'路段起点':60,'路段终点':60,'路段长度km':60,'路面类型':70,'技术等级':65,'PQI':48,'PCI':48,'RQI':48,'PQI分级':48,'年份':38,'县份':48,'交通量':55,'车道数':48}
+        ws = {'路线编码':70,'路段起点':55,'路段终点':55,'路段长度km':55,'路面类型':65,'技术等级':60,'PQI':45,'PCI':45,'RQI':45,'PQI分级':45,'年份':35,'县份':45,'交通量':52,'车道数':45,'路龄':40}
         for c in cols:
             self.data_tree.heading(c, text=c); self.data_tree.column(c, width=ws.get(c,55), anchor='center')
         sv = ttk.Scrollbar(tvf, orient='vertical', command=self.data_tree.yview)
