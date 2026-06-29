@@ -1471,7 +1471,7 @@ class App(tk.Tk):
         self.status_var.set('敏感性分析完成')
 
     def _run_total_optimization(self):
-        """5年总量优化：估算总资金需求+推荐年度最优分配方案"""
+        """针对短/中/长期3个目标，估算总资金需求+推荐年度分配"""
         df = self._get_data('全部')
         if df.empty: return
         import numpy as np
@@ -1480,80 +1480,86 @@ class App(tk.Tk):
             dv = {'路段长度km':1,'交通量':5000,'车道数':2,'路面宽度':7,'PQI':80}[col]
             if col not in df.columns: df[col] = dv
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(dv)
-        years = self.dp_years_var.get(); k = 0.015
-        segs = df; total_km = segs['路段长度km'].sum()
-        target_pqi = 92
-        if hasattr(self,'target_vars') and 'mid_国道_PQI' in self.target_vars:
-            target_pqi = self.target_vars['mid_国道_PQI'].get()
-
-        # 第一阶段：逐年不加预算，只算自然衰减+必需修复的累计费用
-        pqi_arr = segs['PQI'].values.copy()
+        k = 0.015; segs = df; total_km = segs['路段长度km'].sum()
         pm = {v: i for i, v in enumerate(segs.index)}
-        yearly_needs = []   # (year, needed_km, needed_cost_万元)
-        yearly_cost_sum = 0
-        repaired_mask = np.zeros(len(segs), dtype=bool)
 
-        for yr in range(1, years+1):
-            pqi_arr = pqi_arr * np.exp(-k)
-            need = (pqi_arr < 80) & (~repaired_mask)  # 未修复过的
-            needed_km = segs['路段长度km'].values[need].sum()
-            needed_cost = 0
-            if need.sum() > 0:
-                m = segs[need].copy()
-                needed_cost = (m['路段长度km'] * 1000 * m['路面宽度'] * 319 / 10000).sum()
-            yearly_needs.append((yr, needed_km, needed_cost))
-            yearly_cost_sum += needed_cost
-            # 标记已修复
-            repaired_mask[need] = True
-            # 修复后PQI回调
-            for idx in np.where(need)[0]:
-                ap = pm.get(segs.index[idx], -1)
-                if ap >= 0: pqi_arr[ap] = 92
+        # 读取短/中/长期目标
+        targets = {}
+        if hasattr(self,'target_vars'):
+            for h, hname, hyears in [('short','短期(1年)',1),('mid','中期(5年)',5),('long','长期(10年)',10)]:
+                t = self.target_vars.get(f'{h}_国道_PQI', tk.IntVar(value=92)).get()
+                targets[h] = {'name': hname, 'years': hyears, 'target': t}
 
-        # 第二阶段：按推荐分配计算每年最优投入（前重后轻）
-        total_budget = yearly_cost_sum * 0.85  # 实际可压缩约15%
-        alloc_weights = [0.35, 0.25, 0.20, 0.12, 0.08][:years]
-        alloc_weights = np.array(alloc_weights) / sum(alloc_weights)  # 归一化
-
-        # 用推荐分配重新模拟
-        pqi_arr2 = segs['PQI'].values.copy()
         self.dp_tree.delete(*self.dp_tree.get_children())
-        cum_b = 0; init_pqi = pqi_arr2.mean()
-        alloc_total = 0; final_result = ''
-
-        for yr in range(1, years+1):
-            yr_budget = int(total_budget * alloc_weights[yr-1])
-            pqi_arr2 = pqi_arr2 * np.exp(-k)
-            need = pqi_arr2 < 80; needed_km = segs['路段长度km'].values[need].sum()
-            rkm = 0; remain = yr_budget
-            if need.sum() > 0:
-                m = segs[need].copy()
-                dp = pqi_arr2[need]
-                m['cost'] = m['路段长度km'] * 1000 * m['路面宽度'] * 319 / 10000
-                m['benefit'] = m['交通量'] * 365 * m['路段长度km'] * (92-dp) * 0.015 * m['车道数'] / 10000
-                m['bcr'] = m['benefit'] / m['cost']
-                m = m.sort_values('bcr', ascending=False)
-                for df_idx, row in m.iterrows():
-                    if row['cost'] <= remain:
-                        remain -= row['cost']; rkm += row['路段长度km']
-                        ap = pm.get(df_idx, -1)
-                        if ap >= 0: pqi_arr2[ap] = 92
-                        cum_b += row['benefit'] / 1.05 ** yr
-            wp = (pqi_arr2 * segs['路段长度km'].values).sum() / total_km
-            gr = segs['路段长度km'].values[pqi_arr2>=80].sum() / total_km * 100
-            alloc_total += yr_budget
-            self.dp_tree.insert('','end',values=(f'{yr}年',f'{wp:.1f}',f'{needed_km:.1f}',f'{rkm:.1f}',f'{yr_budget}',f'{gr:.1f}%',f'{cum_b:.0f}'))
-            if yr == years:
-                final_result = f'终PQI:{wp:.1f} {"✓" if wp>=target_pqi else "✗"}'
-
         self.dp_text.delete('1.0','end')
-        year_table = '\n'.join(f'  第{y}年: {int(total_budget*alloc_weights[y-1])}万元 ({alloc_weights[y-1]*100:.0f}%)'
-                               for y in range(1, years+1))
-        self.dp_text.insert('end', f'5年总需求资金: {yearly_cost_sum:.0f}万元\n')
-        self.dp_text.insert('end', f'推荐总预算(85%需求): {total_budget:.0f}万元\n')
-        self.dp_text.insert('end', f'年度推荐分配:\n{year_table}\n')
-        self.dp_text.insert('end', f'目标PQI≥{target_pqi} | {final_result}\n')
-        self.status_var.set(f'总量优化完成 - 总需{yearly_cost_sum:.0f}万 推荐{total_budget:.0f}万')
+        results = []
+
+        for hkey, info in targets.items():
+            years = info['years']; target_pqi = info['target']
+            pqi_arr = segs['PQI'].values.copy()
+            # 估算总需求：逐年自然衰减+修复费用
+            yearly_cost_sum = 0; repaired = np.zeros(len(segs), dtype=bool)
+            for yr in range(1, years+1):
+                pqi_arr = pqi_arr * np.exp(-k)
+                need = (pqi_arr < 80) & (~repaired)
+                if need.sum() > 0:
+                    m = segs[need].copy()
+                    yearly_cost_sum += (m['路段长度km'] * 1000 * m['路面宽度'] * 319 / 10000).sum()
+                    repaired[need] = True
+                    for idx in np.where(need)[0]:
+                        ap = pm.get(segs.index[idx], -1)
+                        if ap >= 0: pqi_arr[ap] = 92
+
+            # 推荐分配：前重后轻
+            if years == 1:
+                weights = [1.0]
+            elif years <= 5:
+                weights = [0.35, 0.25, 0.20, 0.12, 0.08][:years]
+            else:
+                # 10年：前5年集中70%，后5年维护30%
+                w5 = [0.35, 0.25, 0.20, 0.12, 0.08]
+                total5 = sum(w5); w10 = []
+                for w in w5: w10.append(w * 0.7 / total5)
+                for i in range(5): w10.append(0.06)
+                weights = w10
+            weights = np.array(weights) / sum(weights)
+            total_budget = yearly_cost_sum * 0.85
+
+            # 重新模拟
+            pqi_arr2 = segs['PQI'].values.copy()
+            for yr in range(1, years+1):
+                yr_budget = int(total_budget * weights[yr-1])
+                pqi_arr2 = pqi_arr2 * np.exp(-k)
+                need = pqi_arr2 < 80; rkm = 0; remain = yr_budget
+                if need.sum() > 0:
+                    m = segs[need].copy()
+                    dp = pqi_arr2[need]
+                    m['cost'] = m['路段长度km'] * 1000 * m['路面宽度'] * 319 / 10000
+                    m['bcr'] = (m['交通量'] * 365 * m['路段长度km'] * (92-dp) * 0.015 * m['车道数']) / (m['cost']*10000)
+                    m = m.sort_values('bcr', ascending=False)
+                    for df_idx, row in m.iterrows():
+                        if row['cost'] <= remain:
+                            remain -= row['cost']; rkm += row['路段长度km']
+                            ap = pm.get(df_idx, -1)
+                            if ap >= 0: pqi_arr2[ap] = 92
+            final_pqi = (pqi_arr2 * segs['路段长度km'].values).sum() / total_km
+            gr = segs['路段长度km'].values[pqi_arr2>=80].sum() / total_km * 100
+            ok = '✓' if final_pqi >= target_pqi else '✗'
+            yr1 = int(total_budget * weights[0])
+            results.append((info['name'], target_pqi, f'{total_budget:.0f}', f'{yr1}', f'{final_pqi:.1f}', f'{gr:.1f}%', ok))
+
+        # 输出表格
+        self.dp_tree['columns'] = ('目标','PQI目标','总预算(万元)','首年(万元)','终PQI','优良路率','达标')
+        for c in self.dp_tree['columns']:
+            self.dp_tree.heading(c, text=c); self.dp_tree.column(c, width=120, anchor='center')
+        for r in results: self.dp_tree.insert('','end',values=r)
+
+        self.dp_text.insert('end','三个目标的总量优化结果：\n')
+        for info in targets.values():
+            self.dp_text.insert('end',f"  {info['name']}: PQI≥{info['target']} | {info['years']}年\n")
+        self.dp_text.insert('end', '\n分配策略：前重后轻（早期集中投入修复最差路段，后期以维护为主）\n')
+        self.dp_text.insert('end', '短期达标≠中/长期达标。短期修得快但可能资金紧张；长期可分摊但需持续投入。\n')
+        self.status_var.set('短/中/长期总量优化完成')
 
     def _pool_refresh(self):
         self.pool_tree.delete(*self.pool_tree.get_children())
