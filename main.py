@@ -1312,6 +1312,9 @@ class App(tk.Tk):
         tk.Label(c1, text='年增长%：', bg=THEME['card'], font=('Microsoft YaHei',8)).pack(side='left')
         self.dp_growth_var = tk.IntVar(value=0)
         ttk.Entry(c1, textvariable=self.dp_growth_var, width=4).pack(side='left', padx=2)
+        self.dp_cluster_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(c1, text='连续路段聚类', variable=self.dp_cluster_var,
+                      bg=THEME['card'], font=('Microsoft YaHei',8)).pack(side='right', padx=5)
         tk.Button(c1, text='执行优化', command=self._run_dynamic_planning,
                  bg=THEME['accent'], fg='white', font=('Microsoft YaHei',10), padx=12, cursor='hand2').pack(side='right')
         tk.Button(c1, text='5年总量优化', command=self._run_total_optimization,
@@ -1390,6 +1393,62 @@ class App(tk.Tk):
         k_arr = k_base * age_factor * traffic_factor
         return np.clip(k_arr, 0.005, 0.05)
 
+    def _cluster_segments(self, segs, need_mask):
+        """将需要养护的路段按路线+连续桩号聚类，返回聚类列表"""
+        import pandas as pd
+        clusters = []
+        need_df = segs[need_mask].copy()
+        if need_df.empty:
+            return clusters
+        # 按路线编码分组
+        for route, group in need_df.groupby('路线编码'):
+            # 按路段起点排序
+            group = group.sort_values('路段起点')
+            # 贪心聚类：连续桩号合并
+            current_cluster = None
+            for _, row in group.iterrows():
+                if current_cluster is None:
+                    current_cluster = {
+                        'route': route,
+                        'segments': [row.name],
+                        'length': row['路段长度km'],
+                        'cost': row['路段长度km'] * 1000 * row['路面宽度'] * 319 / 10000,
+                        'benefit': row.get('benefit', 0),
+                        'start': str(row.get('路段起点', '')),
+                        'end': str(row.get('路段终点', '')),
+                    }
+                else:
+                    # 检查是否连续（当前段起点 ≈ 上一段终点）
+                    try:
+                        prev_end = float(str(current_cluster['end']).replace('K','').replace('+',''))
+                        curr_start = float(str(row.get('路段起点','')).replace('K','').replace('+',''))
+                        is_contiguous = abs(curr_start - prev_end) < 0.2  # 200m间隙内算连续
+                    except:
+                        is_contiguous = False
+                    if is_contiguous:
+                        current_cluster['segments'].append(row.name)
+                        current_cluster['length'] += row['路段长度km']
+                        current_cluster['cost'] += row['路段长度km'] * 1000 * row['路面宽度'] * 319 / 10000
+                        current_cluster['benefit'] += row.get('benefit', 0)
+                        current_cluster['end'] = str(row.get('路段终点', ''))
+                    else:
+                        clusters.append(current_cluster)
+                        current_cluster = {
+                            'route': route,
+                            'segments': [row.name],
+                            'length': row['路段长度km'],
+                            'cost': row['路段长度km'] * 1000 * row['路面宽度'] * 319 / 10000,
+                            'benefit': row.get('benefit', 0),
+                            'start': str(row.get('路段起点', '')),
+                            'end': str(row.get('路段终点', '')),
+                        }
+            if current_cluster:
+                clusters.append(current_cluster)
+        # 计算每个聚类的BCR
+        for cl in clusters:
+            cl['bcr'] = cl['benefit'] / cl['cost'] if cl['cost'] > 0 else 0
+        return clusters
+
     def _run_dynamic_planning(self):
         df = self._get_data('全部')
         if df.empty: return
@@ -1413,18 +1472,35 @@ class App(tk.Tk):
             need = pqi_arr < 80; needed_km = segs['路段长度km'].values[need].sum()
             rkm = 0; remain = budget
             if need.sum() > 0:
-                m = segs[need].copy()
-                dp = pqi_arr[need]
-                m['cost'] = m['路段长度km'] * 1000 * m['路面宽度'] * 319 / 10000
-                m['benefit'] = m['交通量'] * 365 * m['路段长度km'] * (92-dp) * 0.015 * m['车道数'] / 10000
-                m['bcr'] = m['benefit'] / m['cost']
-                m = m.sort_values('bcr', ascending=False)
-                for df_idx, row in m.iterrows():
-                    if row['cost'] <= remain:
-                        remain -= row['cost']; rkm += row['路段长度km']
-                        ap = pm.get(df_idx, -1)
-                        if ap >= 0: pqi_arr[ap] = 92
-                        cum_b += row['benefit'] / 1.05 ** yr
+                use_cluster = self.dp_cluster_var.get() if hasattr(self,'dp_cluster_var') else False
+                if use_cluster:
+                    # 连续路段聚类模式
+                    m = segs[need].copy()
+                    dp = pqi_arr[need]
+                    m['benefit'] = m['交通量'] * 365 * m['路段长度km'] * (92-dp) * 0.015 * m['车道数'] / 10000
+                    clusters = self._cluster_segments(m, need)
+                    clusters.sort(key=lambda x: x['bcr'], reverse=True)
+                    for cl in clusters:
+                        if cl['cost'] <= remain:
+                            remain -= cl['cost']; rkm += cl['length']
+                            cum_b += cl['benefit'] / 1.05 ** yr
+                            for seg_idx in cl['segments']:
+                                ap = pm.get(seg_idx, -1)
+                                if ap >= 0: pqi_arr[ap] = 92
+                else:
+                    # 逐段独立模式
+                    m = segs[need].copy()
+                    dp = pqi_arr[need]
+                    m['cost'] = m['路段长度km'] * 1000 * m['路面宽度'] * 319 / 10000
+                    m['benefit'] = m['交通量'] * 365 * m['路段长度km'] * (92-dp) * 0.015 * m['车道数'] / 10000
+                    m['bcr'] = m['benefit'] / m['cost']
+                    m = m.sort_values('bcr', ascending=False)
+                    for df_idx, row in m.iterrows():
+                        if row['cost'] <= remain:
+                            remain -= row['cost']; rkm += row['路段长度km']
+                            ap = pm.get(df_idx, -1)
+                            if ap >= 0: pqi_arr[ap] = 92
+                            cum_b += row['benefit'] / 1.05 ** yr
             wp = (pqi_arr * segs['路段长度km'].values).sum() / total_km
             gr = segs['路段长度km'].values[pqi_arr>=80].sum() / total_km * 100
             self.dp_tree.insert('','end',values=(f'{yr}年',f'{wp:.1f}',f'{needed_km:.1f}',f'{rkm:.1f}',f'{budget}',f'{gr:.1f}%',f'{cum_b:.0f}'))
