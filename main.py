@@ -221,6 +221,7 @@ class App(tk.Tk):
         # 显示对应内容（footer 之前）
         page = getattr(self, f'_page{step_num}')
         page.pack(fill='both', expand=True, before=self.content_footer)
+        page.pack_propagate(False)  # 禁止子控件影响容器尺寸
         self._current_page = page
 
         # 更新侧边栏状态
