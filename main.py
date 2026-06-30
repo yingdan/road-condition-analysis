@@ -877,18 +877,19 @@ class App(tk.Tk):
                 tk.Label(grd, text=f'{label} ', bg=self._bg(gd), font=('Microsoft YaHei',9)).pack(side='left')
                 v = tk.IntVar(value=dv); self.target_vars[f'{hkey}_国道_{suffix}'] = v
                 ttk.Entry(grd, textvariable=v, width=5, font=('Microsoft YaHei',9)).pack(side='left', padx=(0,8))
-            tk.Label(grd, text='参考→', bg=self._bg(gd), fg=THEME['text_light'],
-                    font=('Microsoft YaHei',8)).pack(side='left', padx=(5,5))
-            for label, suffix, dv in [('B/C','BCR',default_targets[hkey]['国道_BCR']),
-                                       ('成本万/km','km成本',default_targets[hkey]['国道_km成本'])]:
-                tk.Label(grd, text=f'{label} ', bg=self._bg(gd), font=('Microsoft YaHei',9)).pack(side='left')
-                if suffix == 'BCR':
-                    v = tk.StringVar(value=str(dv))  # 直接存"1.2"而非120
-                else:
-                    v = tk.IntVar(value=dv)
-                self.target_vars[f'{hkey}_国道_{suffix}'] = v
-                w = 5
-                ttk.Entry(grd, textvariable=v, width=w, font=('Microsoft YaHei',9)).pack(side='left', padx=(0,8))
+            # 短期只显示技术指标，中/长期增加参考值
+            if hkey != 'short':
+                tk.Label(grd, text='参考→', bg=self._bg(gd), fg=THEME['text_light'],
+                        font=('Microsoft YaHei',8)).pack(side='left', padx=(5,5))
+                for label, suffix, dv in [('B/C','BCR',default_targets[hkey]['国道_BCR']),
+                                           ('成本万/km','km成本',default_targets[hkey]['国道_km成本'])]:
+                    tk.Label(grd, text=f'{label} ', bg=self._bg(gd), font=('Microsoft YaHei',9)).pack(side='left')
+                    if suffix == 'BCR':
+                        v = tk.StringVar(value=str(dv))
+                    else:
+                        v = tk.IntVar(value=dv)
+                    self.target_vars[f'{hkey}_国道_{suffix}'] = v
+                    ttk.Entry(grd, textvariable=v, width=5, font=('Microsoft YaHei',9)).pack(side='left', padx=(0,8))
             # 省道
             sd = ttk.LabelFrame(r, text='普通省道', padding=5)
             sd.pack(side='left', fill='x', expand=True)
@@ -900,18 +901,19 @@ class App(tk.Tk):
                 tk.Label(srd, text=f'{label} ', bg=self._bg(sd), font=('Microsoft YaHei',9)).pack(side='left')
                 v = tk.IntVar(value=dv); self.target_vars[f'{hkey}_省道_{suffix}'] = v
                 ttk.Entry(srd, textvariable=v, width=5, font=('Microsoft YaHei',9)).pack(side='left', padx=(0,8))
-            tk.Label(srd, text='参考→', bg=self._bg(sd), fg=THEME['text_light'],
-                    font=('Microsoft YaHei',8)).pack(side='left', padx=(5,5))
-            for label, suffix, dv in [('B/C','BCR',default_targets[hkey]['省道_BCR']),
-                                       ('成本万/km','km成本',default_targets[hkey]['省道_km成本'])]:
-                tk.Label(srd, text=f'{label} ', bg=self._bg(sd), font=('Microsoft YaHei',9)).pack(side='left')
-                if suffix == 'BCR':
-                    v = tk.StringVar(value=str(dv))
-                else:
-                    v = tk.IntVar(value=dv)
-                self.target_vars[f'{hkey}_省道_{suffix}'] = v
-                w = 5
-                ttk.Entry(srd, textvariable=v, width=w, font=('Microsoft YaHei',9)).pack(side='left', padx=(0,8))
+            if hkey != 'short':
+                tk.Label(srd, text='参考→', bg=self._bg(sd), fg=THEME['text_light'],
+                        font=('Microsoft YaHei',8)).pack(side='left', padx=(5,5))
+            if hkey != 'short':
+                for label, suffix, dv in [('B/C','BCR',default_targets[hkey]['省道_BCR']),
+                                           ('成本万/km','km成本',default_targets[hkey]['省道_km成本'])]:
+                    tk.Label(srd, text=f'{label} ', bg=self._bg(sd), font=('Microsoft YaHei',9)).pack(side='left')
+                    if suffix == 'BCR':
+                        v = tk.StringVar(value=str(dv))
+                    else:
+                        v = tk.IntVar(value=dv)
+                    self.target_vars[f'{hkey}_省道_{suffix}'] = v
+                    ttk.Entry(srd, textvariable=v, width=5, font=('Microsoft YaHei',9)).pack(side='left', padx=(0,8))
 
         # 按钮 + 对比表
         r = self._row(parent, 12)
