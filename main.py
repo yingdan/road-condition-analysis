@@ -1307,8 +1307,8 @@ class App(tk.Tk):
         tk.Label(c1, text='首年预算(万元)：', bg=THEME['card'], font=('Microsoft YaHei',9)).pack(side='left')
         self.budget_var = tk.IntVar(value=5000)
         ttk.Entry(c1, textvariable=self.budget_var, width=10).pack(side='left', padx=5)
-        tk.Scale(c1, from_=500, to=20000, resolution=100, orient='horizontal',
-                variable=self.budget_var, length=200, showvalue=False).pack(side='left', padx=5)
+        tk.Scale(c1, from_=1000, to=200000, resolution=1000, orient='horizontal',
+                variable=self.budget_var, length=250, showvalue=False).pack(side='left', padx=5)
         tk.Label(c1, text='年增长%：', bg=THEME['card'], font=('Microsoft YaHei',8)).pack(side='left')
         self.dp_growth_var = tk.IntVar(value=0)
         ttk.Entry(c1, textvariable=self.dp_growth_var, width=4).pack(side='left', padx=2)
@@ -1449,7 +1449,7 @@ class App(tk.Tk):
             target_pqi = self.target_vars['mid_国道_PQI'].get()
 
         self.sens_tree.delete(*self.sens_tree.get_children())
-        budgets = [500,1000,2000,3000,5000,8000,10000,15000,20000]
+        budgets = [5000,10000,20000,30000,50000,80000,100000,150000,200000]
         best_budget = None; reached_pqi = 0
 
         for bud in budgets:
