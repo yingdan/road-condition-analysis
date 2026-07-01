@@ -228,6 +228,10 @@ def analyze_demand(df: pd.DataFrame,
         maint_type, reason = judge_maintenance(
             pqi_pred, pci0, rqi0, ptype, tgrade, thresholds, enabled
         )
+        # 日志记录触发详情
+        if maint_type == '路面改造':
+            pqi_en = enabled.get(f'路面改造_{ptype}_{tgrade}_PQI_启用', True) if enabled else True
+            print(f'[DEMAND] {route} PQI={pqi_pred:.1f} PCI={pci0:.1f} EN={pqi_en} -> {maint_type} [{reason}]')
 
         # 计算优先级分数（路况差→高优先级）
         priority_score = max(0, (90 - pqi_pred) / 90 * 100)

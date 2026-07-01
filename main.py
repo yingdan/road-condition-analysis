@@ -1287,6 +1287,10 @@ class App(tk.Tk):
                 for k,v in self.trigger_vars.items():
                     if '_启用' in k:
                         enabled_flags[k] = bool(v.get())
+            print(f'[LOG] enabled_flags count={len(enabled_flags)}')
+            if enabled_flags:
+                pqi_on = enabled_flags.get('路面改造_沥青路面_一级公路_PQI_启用', True)
+                print(f'[LOG] PQI_启用(沥青/一级)={pqi_on}')
             result = analyze_demand(df, target_year=ty, decay_rates=dr, enabled=enabled_flags)
             def cc(r):
                 ln = r.get('路段长度(km)',1); mt = r.get('养护类型','日常养护'); pt = r.get('路面类型','沥青路面')
