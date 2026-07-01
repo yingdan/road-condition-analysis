@@ -104,42 +104,47 @@ def get_grade_key(tech_grade: str) -> str:
 
 def judge_maintenance(pqi: float, pci: float, rqi: float,
                       pavement_type: str, tech_grade: str,
-                      thresholds: Dict = None) -> Tuple[str, str]:
+                      thresholds: Dict = None,
+                      enabled: Dict = None) -> Tuple[str, str]:
     """
     判断养护类型
 
-    返回:
-        (养护类型, 触发条件描述)
-        养护类型：'路面改造'/'预防性养护'/'日常养护'
+    参数:
+        enabled: dict, key格式如 '路面改造_沥青路面_一级公路_PCI_启用', value为True/False
     """
     if thresholds is None:
         thresholds = TRIGGER_THRESHOLDS
+    if enabled is None:
+        enabled = {}  # 默认全部启用
 
     grade_key = get_grade_key(tech_grade)
+    prefix = f'{pavement_type}_{grade_key}'
 
     # 检查路面改造条件
     reform_cfg = thresholds.get('路面改造', {}).get(pavement_type, {}).get(grade_key, {})
     if reform_cfg:
-        pci_threshold = reform_cfg.get('PCI', 80)
-        pqi_threshold = reform_cfg.get('PQI', 80)
-        rqi_threshold = reform_cfg.get('RQI', 80)
+        pci_en = enabled.get(f'路面改造_{prefix}_PCI_启用', True)
+        pqi_en = enabled.get(f'路面改造_{prefix}_PQI_启用', True)
+        rqi_en = enabled.get(f'路面改造_{prefix}_RQI_启用', True)
 
-        if pci < pci_threshold:
-            return ('路面改造', f'PCI({pci:.1f}) < {pci_threshold}')
-        if pqi < pqi_threshold:
-            return ('路面改造', f'PQI({pqi:.1f}) < {pqi_threshold}')
-        if not pd.isna(rqi) and rqi < rqi_threshold:
-            return ('路面改造', f'RQI({rqi:.1f}) < {rqi_threshold}')
+        if pci_en and pci < reform_cfg.get('PCI', 80):
+            return ('路面改造', f'PCI({pci:.1f}) < {reform_cfg.get("PCI",80)}')
+        if pqi_en and pqi < reform_cfg.get('PQI', 80):
+            return ('路面改造', f'PQI({pqi:.1f}) < {reform_cfg.get("PQI",80)}')
+        if rqi_en and not pd.isna(rqi) and rqi < reform_cfg.get('RQI', 80):
+            return ('路面改造', f'RQI({rqi:.1f}) < {reform_cfg.get("RQI",80)}')
 
     # 检查预防性养护条件
     prev_cfg = thresholds.get('预防性养护', {}).get(pavement_type, {}).get(grade_key, {})
     if prev_cfg:
+        pci_en = enabled.get(f'预防性养护_{prefix}_PCI_启用', True)
+        pqi_en = enabled.get(f'预防性养护_{prefix}_PQI_启用', True)
         pci_lo = prev_cfg.get('PCI低', 80)
         pci_hi = prev_cfg.get('PCI高', 90)
         pqi_min = prev_cfg.get('PQI', 80)
-
-        # PCI在范围内且PQI满足条件
-        if pci_lo <= pci <= pci_hi and pqi >= pqi_min:
+        pci_ok = (not pci_en) or (pci_lo <= pci <= pci_hi)
+        pqi_ok = (not pqi_en) or (pqi >= pqi_min)
+        if pci_ok and pqi_ok and (pci_en or pqi_en):
             return ('预防性养护', f'PCI({pci:.1f})在{pci_lo}-{pci_hi}范围，PQI({pqi:.1f})≥{pqi_min}')
 
     return ('日常养护', '路况良好，仅需日常养护')
@@ -153,7 +158,8 @@ def analyze_demand(df: pd.DataFrame,
                    target_year: int = 2026,
                    targets: Dict = None,
                    decay_rates: Dict = None,
-                   thresholds: Dict = None) -> pd.DataFrame:
+                   thresholds: Dict = None,
+                   enabled: Dict = None) -> pd.DataFrame:
     """
     分析路网养护需求
 
@@ -220,7 +226,7 @@ def analyze_demand(df: pd.DataFrame,
 
         # 判断养护需求
         maint_type, reason = judge_maintenance(
-            pqi_pred, pci0, rqi0, ptype, tgrade, thresholds
+            pqi_pred, pci0, rqi0, ptype, tgrade, thresholds, enabled
         )
 
         # 计算优先级分数（路况差→高优先级）

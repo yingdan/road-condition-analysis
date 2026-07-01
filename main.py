@@ -1281,7 +1281,13 @@ class App(tk.Tk):
             from src.decision.performance_models import calibrate_exponential_model
             all_df = pd.concat(self.data_cache.values(), ignore_index=True)
             dr = calibrate_exponential_model(all_df)
-            result = analyze_demand(df, target_year=ty, decay_rates=dr)
+            # 传递用户启用的触发条件
+            enabled_flags = {}
+            if hasattr(self,'trigger_vars'):
+                for k,v in self.trigger_vars.items():
+                    if '_启用' in k:
+                        enabled_flags[k] = bool(v.get())
+            result = analyze_demand(df, target_year=ty, decay_rates=dr, enabled=enabled_flags)
             def cc(r):
                 ln = r.get('路段长度(km)',1); mt = r.get('养护类型','日常养护'); pt = r.get('路面类型','沥青路面')
                 pk = f'{mt}_{pt}'
