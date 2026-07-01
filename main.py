@@ -468,7 +468,7 @@ class App(tk.Tk):
             cv = ['全部']+sorted(counties); yv = ['全部']+[str(y) for y in sorted(years)]
             self.filter_county_cb['values'] = cv; self.filter_year_cb['values'] = yv
             # 更新所有页面的县份下拉
-            for a in ['tech_county_cb','model_county_cb','demand_county_cb','benefit_county_cb','map_county_cb']:
+            for a in ['tech_county_cb','model_county_cb','demand_county_cb','benefit_county_cb','map_county_cb','dp_county_cb']:
                 if hasattr(self, a): getattr(self, a)['values'] = cv
             if counties:
                 self.filter_county_var.set(counties[0])
