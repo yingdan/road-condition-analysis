@@ -1330,7 +1330,7 @@ class App(tk.Tk):
                  bg=THEME['warning'], fg='white', font=('Microsoft YaHei',9), padx=8, cursor='hand2').pack(side='right', padx=5)
         tk.Button(c1, text='敏感性分析', command=self._run_sensitivity,
                  bg=THEME['warning'], fg='white', font=('Microsoft YaHei',9), padx=8, cursor='hand2').pack(side='right', padx=3)
-        cols_dp = ('年份','年初PQI','需改造(km)','改造(km)','年投入(万)','改造后PQI','路率(%)','效益(万)')
+        cols_dp = ('年份','年初PQI','需改造(km)','改造(km)','年投入(万)','改造后PQI','优良路率(%)','累计效益(万)')
         self.dp_tree = ttk.Treeview(card_opt, columns=cols_dp, show='headings', height=6)
         for ct in cols_dp: self.dp_tree.heading(ct, text=ct); self.dp_tree.column(ct, width=130, anchor='center')
         self.dp_tree.pack(fill='both', expand=True, pady=(5,0))
