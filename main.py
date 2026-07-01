@@ -122,7 +122,7 @@ class App(tk.Tk):
         s.configure('TNotebook', background=THEME['bg'])
         s.configure('TNotebook.Tab', font=('Microsoft YaHei', 10), padding=(10, 5))
         s.configure('TLabelframe', background=THEME['card'])
-        s.configure('TLabelframe.Label', font=('Microsoft YaHei', 10, 'bold'), foreground=THEME['text'])
+        s.configure('TLabelframe.Label', font=('Microsoft YaHei', 10), foreground=THEME['text'])
 
     # ══════════════════════════════════════════════════════════════════════════
     #  左侧边栏
@@ -198,7 +198,7 @@ class App(tk.Tk):
         # 更新侧边栏高亮
         for n, btn in self.step_buttons.items():
             if n == step_num:
-                btn.config(fg='white', font=('Microsoft YaHei', 10, 'bold'), bg=THEME['sidebar_active'])
+                btn.config(fg='white', font=('Microsoft YaHei', 10), bg=THEME['sidebar_active'])
                 btn.master.configure(bg=THEME['sidebar_active'])
                 self.step_indicators[n].configure(bg=THEME['sidebar_active'])
                 self.step_indicators[n].delete('all')
@@ -330,7 +330,7 @@ class App(tk.Tk):
         tk.Button(r, text='📂 批量识别', command=self._browse_folder,
                  bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9), padx=12, cursor='hand2').pack(side='left', padx=3)
         tk.Button(r, text='🚀 加载数据', command=self._load_data,
-                 bg=THEME['success'], fg='white', font=('Microsoft YaHei', 10, 'bold'),
+                 bg=THEME['success'], fg='white', font=('Microsoft YaHei', 10),
                  padx=15, pady=3, cursor='hand2').pack(side='left', padx=5)
         self.load_info = tk.Label(r, text='点击"批量识别"或逐项选择文件后加载', bg=THEME['card'],
                                   fg=THEME['text_light'], font=('Microsoft YaHei', 9))
@@ -529,7 +529,7 @@ class App(tk.Tk):
         self.tech_year_var = tk.StringVar(value='2025')
         ttk.Combobox(r, textvariable=self.tech_year_var, width=6, values=['2021','2022','2023','2024','2025']).pack(side='left', padx=5)
         tk.Button(r, text='▶ 执行分析', command=self._run_tech,
-                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 10, 'bold'), padx=15, cursor='hand2').pack(side='left', padx=15)
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 10), padx=15, cursor='hand2').pack(side='left', padx=15)
         tk.Button(r, text='📥 导出全部', command=self._export_tech_all, font=('Microsoft YaHei', 9)).pack(side='right', padx=5)
 
         # 可拖拽调整的4栏区域
@@ -685,7 +685,7 @@ class App(tk.Tk):
         rp.pack(side='right', fill='y')
         sv = ttk.Scrollbar(rp, orient='vertical', command=tv.yview)
         sv.pack(side='top', fill='y', expand=True)
-        tk.Button(rp, text='📋', font=('Microsoft YaHei', 7),
+        tk.Button(rp, text='📋', font=('Microsoft YaHei', 9),
                  command=lambda t=tv: self._copy_tree(t), padx=3).pack(side='bottom', pady=(2,0))
         tv.configure(yscrollcommand=sv.set)
         tv.pack(side='left', fill='both', expand=True)
@@ -811,7 +811,7 @@ class App(tk.Tk):
         canvas.draw(); canvas.get_tk_widget().pack(fill='both', expand=True)
         # 导出按钮
         bf = tk.Frame(cf, bg=THEME['card']); bf.pack(fill='x')
-        tk.Button(bf, text='💾 导出图表', font=('Microsoft YaHei', 7),
+        tk.Button(bf, text='💾 导出图表', font=('Microsoft YaHei', 9),
                  command=lambda f=fig: ExportHelper.export(f)).pack(side='left')
 
     def _copy_tree(self, tv):
@@ -1112,7 +1112,7 @@ class App(tk.Tk):
         # 按钮
         r = self._row(sf, 15)
         tk.Button(r, text='💾 保存全部配置', command=self._save_policy_config,
-                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 10, 'bold'),
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 10),
                  padx=18, pady=4, cursor='hand2').pack(side='left', padx=20)
         tk.Button(r, text='↺ 恢复默认', command=self._reset_policy_config,
                  font=('Microsoft YaHei', 9), padx=12).pack(side='left', padx=5)
