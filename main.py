@@ -1452,7 +1452,9 @@ class App(tk.Tk):
 
     def _run_dynamic_planning(self):
         df = self._get_data('全部')
-        if df.empty: return
+        if df.empty:
+            messagebox.showwarning('提示','请先加载数据')
+            return
         import numpy as np
         if '年份' in df.columns: df = df[df['年份']==df['年份'].max()]
         for col in ['路段长度km','交通量','车道数','路面宽度','PQI','路龄']:
@@ -1465,6 +1467,7 @@ class App(tk.Tk):
         k_arr = self._calc_seg_decay(segs)  # 逐路段衰减系数
         pqi_arr = segs['PQI'].values.copy()
         pm = {v: i for i, v in enumerate(segs.index)}
+        self.status_var.set('正在运行动态规划...')
         self.dp_tree.delete(*self.dp_tree.get_children())
         cum_b = 0; init_pqi = pqi_arr.mean()
         for yr in range(1, years+1):
