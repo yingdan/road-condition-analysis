@@ -1007,20 +1007,19 @@ class App(tk.Tk):
         sf.bind('<Configure>', lambda e: cvs.configure(scrollregion=cvs.bbox('all')))
 
         self._section_title(sf, '⚙️ 对策模型')
-        self._section_sub(sf, '一、衰减率标定 | 二、触发阈值 | 三、回调值 | 四、方案单价')
+        self._section_sub(sf, '四个模型统一配置面板')
 
         # 一、衰减率标定
-        tf = ttk.LabelFrame(sf, text='一、衰减率标定 - PQI(t)=PQI0*exp(-k*t)', padding=8)
-        tf.pack(fill='x', padx=10, pady=5)
-        r = self._row(tf)
-        tk.Label(r, text='县份：', bg=self._bg(tf), font=('Microsoft YaHei',9)).pack(side='left')
+        card0 = self._card(sf, '一、衰减率标定 — PQI(t)=PQI₀×e^(-k×t)')
+        r = self._row(card0)
+        tk.Label(r, text='县份：', bg=THEME['card'], font=('Microsoft YaHei',9)).pack(side='left')
         self.model_county_var = tk.StringVar(value='全部')
         self.model_county_cb = ttk.Combobox(r, textvariable=self.model_county_var, width=12, state='readonly', values=['全部'])
         self.model_county_cb.pack(side='left', padx=8)
         tk.Button(r, text='计算衰减率', command=self._calc_decay, bg=THEME['accent'], fg='white',
                  font=('Microsoft YaHei',9), padx=10, cursor='hand2').pack(side='left', padx=8)
         cols = ('路面类型','技术等级','PQI衰减k','PCI衰减k','RQI衰减k','样本数')
-        self.decay_tree = ttk.Treeview(tf, columns=cols, show='headings', height=5)
+        self.decay_tree = ttk.Treeview(card0, columns=cols, show='headings', height=5)
         for c in cols: self.decay_tree.heading(c, text=c); self.decay_tree.column(c, width=100, anchor='center')
         self.decay_tree.pack(fill='x', pady=(5,0))
 
@@ -1077,8 +1076,8 @@ class App(tk.Tk):
                 ttk.Entry(r, textvariable=v, width=8).pack(side='left')
 
         # 四、养护方案单价明细表（双击单价可编辑）
-        card3 = ttk.LabelFrame(sf, text='四、养护方案单价明细', padding=8)
-        card3.pack(fill='x', padx=10, pady=5)
+        card3 = self._card(sf, '四、养护方案单价明细（双击单价可编辑）')
+        card3.configure(height=300)
         cols_p = ('路面类型','养护工程','技术等级','养护方案','单价')
         self.price_tree = ttk.Treeview(card3, columns=cols_p, show='headings', height=15)
         for ct,w in [('路面类型',70),('养护工程',80),('技术等级',70),('养护方案',320),('单价',70)]:
