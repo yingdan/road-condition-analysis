@@ -1252,7 +1252,10 @@ class App(tk.Tk):
             result['养护类型'] = result['养护类型'].fillna('日常养护')
             self.demand_result_df = result
             self._refresh_demand_tree(result, ty)
-            self.demand_summary.config(text=f'总路段：{len(result)} | 路面改造：{len(result[result["养护类型"]=="路面改造"])} | 预防性养护：{len(result[result["养护类型"]=="预防性养护"])} | 日常养护：{len(result[result["养护类型"]=="日常养护"])}')
+            def km_of(df, mt):
+                s = df[df['养护类型']==mt]['路段长度(km)'].sum() if '路段长度(km)' in df.columns else len(df[df['养护类型']==mt])
+                return f'{s:.1f}km'
+            self.demand_summary.config(text=f'总路段：{len(result)}条({result["路段长度(km)"].sum() if "路段长度(km)" in result.columns else 0:.1f}km) | 路面改造：{len(result[result["养护类型"]=="路面改造"])}条({km_of(result,"路面改造")}) | 预防性养护：{len(result[result["养护类型"]=="预防性养护"])}条({km_of(result,"预防性养护")}) | 日常养护：{len(result[result["养护类型"]=="日常养护"])}条({km_of(result,"日常养护")})')
             self.mark_step_done(6)
             self.status_var.set(f'需求分析完成 — {len(result)}个需求')
         except Exception as e:
@@ -1482,16 +1485,21 @@ class App(tk.Tk):
         for yr in range(1, years+1):
             budget = int(base_budget * (1 + growth) ** (yr - 1))
             pqi_arr = pqi_arr * np.exp(-k_arr)  # 逐路段衰减
+            pre_repair_pqi = (pqi_arr * segs['路段长度km'].values).sum() / total_km  # 改造前
             need = pqi_arr < 80; needed_km = segs['路段长度km'].values[need].sum()
             rkm = 0; remain = budget
             if need.sum() > 0:
                 use_cluster = self.dp_cluster_var.get() if hasattr(self,'dp_cluster_var') else False
                 if use_cluster:
                     # 连续路段聚类模式
-                    m = segs[need].copy()
-                    dp = pqi_arr[need]
-                    m['benefit'] = m['交通量'] * 365 * m['路段长度km'] * (92-dp) * 0.015 * m['车道数'] / 10000
-                    clusters = self._cluster_segments(m, need)
+                    clusters = self._cluster_segments(segs, need)
+                    if clusters:
+                        for cl in clusters:
+                            cl['benefit'] = 0
+                            for seg_idx in cl['segments']:
+                                row = segs.loc[seg_idx]
+                                cl['benefit'] += row['交通量'] * 365 * row['路段长度km'] * (92 - pqi_arr[pm[seg_idx]]) * 0.015 * row['车道数'] / 10000
+                            cl['bcr'] = cl['benefit'] / cl['cost'] if cl['cost'] > 0 else 0
                     clusters.sort(key=lambda x: x['bcr'], reverse=True)
                     for cl in clusters:
                         if cl['cost'] <= remain:
@@ -1516,7 +1524,7 @@ class App(tk.Tk):
                             cum_b += row['benefit'] / 1.05 ** yr
             wp = (pqi_arr * segs['路段长度km'].values).sum() / total_km
             gr = segs['路段长度km'].values[pqi_arr>=80].sum() / total_km * 100
-            self.dp_tree.insert('','end',values=(f'{yr}年',f'{wp:.1f}',f'{needed_km:.1f}',f'{rkm:.1f}',
+            self.dp_tree.insert('','end',values=(f'{yr}年',f'{pre_repair_pqi:.1f}',f'{needed_km:.1f}',f'{rkm:.1f}',
                 f'{budget}',f'{wp:.1f}',f'{gr:.1f}%',f'{cum_b:.0f}'))
         # 无约束参考
         pqi_final = pqi_arr
