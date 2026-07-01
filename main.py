@@ -127,7 +127,9 @@ class App(tk.Tk):
         if 'triggers' in cfg and hasattr(self,'trigger_vars'):
             for k,v in cfg['triggers'].items():
                 if k in self.trigger_vars:
-                    try: self.trigger_vars[k].set(v)
+                    try:
+                        self.trigger_vars[k].set(v)
+                        if '_启用' in k: print(f'[RESTORE] {k} = {v}')
                     except: pass
         # 恢复回调值
         if 'callbacks' in cfg and hasattr(self,'callback_vars'):
