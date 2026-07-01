@@ -146,7 +146,10 @@ def judge_maintenance(pqi: float, pci: float, rqi: float,
         pci_ok = (not pci_en) or (pci_lo <= pci <= pci_hi)
         pqi_ok = (not pqi_en) or (pqi >= pqi_min)
         if pci_ok and pqi_ok and (pci_en or pqi_en):
-            return ('预防性养护', f'PCI({pci:.1f})在{pci_lo}-{pci_hi}范围，PQI({pqi:.1f})≥{pqi_min}')
+            parts = []
+            if pci_en: parts.append(f'PCI({pci:.1f})在{pci_lo}-{pci_hi}范围')
+            if pqi_en: parts.append(f'PQI({pqi:.1f})≥{pqi_min}')
+            return ('预防性养护', '；'.join(parts) if parts else 'PCI/PQI满足条件')
 
     return ('日常养护', '路况良好，仅需日常养护')
 
