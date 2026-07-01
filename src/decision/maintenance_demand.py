@@ -126,6 +126,7 @@ def judge_maintenance(pqi: float, pci: float, rqi: float,
         pci_en = enabled.get(f'路面改造_{prefix}_PCI_启用', True)
         pqi_en = enabled.get(f'路面改造_{prefix}_PQI_启用', True)
         rqi_en = enabled.get(f'路面改造_{prefix}_RQI_启用', True)
+        print(f'[JUDGE] reform {pavement_type}/{grade_key}: PCI_EN={pci_en} PQI_EN={pqi_en} RQI_EN={rqi_en} (total enabled keys={len(enabled)})')
 
         if pci_en and pci < reform_cfg.get('PCI', 80):
             return ('路面改造', f'PCI({pci:.1f}) < {reform_cfg.get("PCI",80)}')
