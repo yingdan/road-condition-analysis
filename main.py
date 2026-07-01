@@ -1287,7 +1287,16 @@ class App(tk.Tk):
     # ══════════════════════════════════════════════════════════════════════════
     def _build_page6(self, parent):
         self._section_title(parent, '📊 投资规划')
-        self._section_sub(parent, '经济指标 + 多年动态优化 + 项目库管理')
+        self._section_sub(parent, '经济指标 + 多年动态优化（约束 vs 无约束）+ 项目库')
+
+        # 县份选择
+        r0 = self._row(parent)
+        tk.Label(r0, text='选择区域：', bg=THEME['bg'], font=('Microsoft YaHei',9)).pack(side='left')
+        self.dp_county_var = tk.StringVar(value='全部')
+        self.dp_county_cb = ttk.Combobox(r0, textvariable=self.dp_county_var, width=12, state='readonly', values=['全部'])
+        self.dp_county_cb.pack(side='left', padx=5)
+        self.dp_county_label = tk.Label(r0, text='', bg=THEME['bg'], fg=THEME['accent'], font=('Microsoft YaHei',9,'bold'))
+        self.dp_county_label.pack(side='left', padx=10)
 
         # 经济指标面板
         card_econ = self._card(parent)
@@ -1322,7 +1331,7 @@ class App(tk.Tk):
                  bg=THEME['warning'], fg='white', font=('Microsoft YaHei',9), padx=8, cursor='hand2').pack(side='right', padx=5)
         tk.Button(c1, text='敏感性分析', command=self._run_sensitivity,
                  bg=THEME['warning'], fg='white', font=('Microsoft YaHei',9), padx=8, cursor='hand2').pack(side='right', padx=3)
-        cols_dp = ('年份','年初PQI','需改造里程(km)','实际改造(km)','年投入(万元)','优良路率(%)','累计效益(万元)')
+        cols_dp = ('年份','年初PQI','需改造(km)','改造(km)','年投入(万)','改造后PQI','路率(%)','效益(万)')
         self.dp_tree = ttk.Treeview(card_opt, columns=cols_dp, show='headings', height=6)
         for ct in cols_dp: self.dp_tree.heading(ct, text=ct); self.dp_tree.column(ct, width=130, anchor='center')
         self.dp_tree.pack(fill='both', expand=True, pady=(5,0))
@@ -1451,11 +1460,12 @@ class App(tk.Tk):
         return clusters
 
     def _run_dynamic_planning(self):
-        df = self._get_data('全部')
+        county = self.dp_county_var.get() if hasattr(self,'dp_county_var') else '全部'
+        df = self._get_data(county)
         if df.empty:
-            messagebox.showwarning('提示','请先加载数据')
-            return
+            messagebox.showwarning('提示','请先加载数据'); return
         import numpy as np
+        self.dp_county_label.config(text=f'当前: {county}')
         if '年份' in df.columns: df = df[df['年份']==df['年份'].max()]
         for col in ['路段长度km','交通量','车道数','路面宽度','PQI','路龄']:
             dv = {'路段长度km':1,'交通量':5000,'车道数':2,'路面宽度':7,'PQI':80,'路龄':5}[col]
@@ -1507,7 +1517,16 @@ class App(tk.Tk):
                             cum_b += row['benefit'] / 1.05 ** yr
             wp = (pqi_arr * segs['路段长度km'].values).sum() / total_km
             gr = segs['路段长度km'].values[pqi_arr>=80].sum() / total_km * 100
-            self.dp_tree.insert('','end',values=(f'{yr}年',f'{wp:.1f}',f'{needed_km:.1f}',f'{rkm:.1f}',f'{budget}',f'{gr:.1f}%',f'{cum_b:.0f}'))
+            self.dp_tree.insert('','end',values=(f'{yr}年',f'{wp:.1f}',f'{needed_km:.1f}',f'{rkm:.1f}',
+                f'{budget}',f'{wp:.1f}',f'{gr:.1f}%',f'{cum_b:.0f}'))
+        # 无约束参考
+        pqi_final = pqi_arr
+        need_after = pqi_final < 80
+        total_need = segs['路段长度km'].values[need_after].sum()
+        total_need_cost = (segs.loc[need_after,'路段长度km']*1000*segs.loc[need_after,'路面宽度']*319/10000).sum() if total_need>0 else 0
+        self.dp_text.delete('1.0','end')
+        self.dp_text.insert('end',f'资金约束下: {years}年累计效益{cum_b:.0f}万 | 剩余未修{total_need:.1f}km\n')
+        self.dp_text.insert('end',f'无约束全修: 需改{total_need:.1f}km 需{total_need_cost:.0f}万\n')
         self.status_var.set(f'动态规划完成 - {years}年')
 
     def _run_sensitivity(self):
