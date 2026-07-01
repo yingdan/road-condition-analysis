@@ -98,6 +98,7 @@ class App(tk.Tk):
         self._setup_style()
         self._build_sidebar()
         self._build_content_area()
+        self._restore_saved_settings()  # 恢复已保存的参数
 
         # 默认选中步骤1
         self._switch_step(1)
@@ -112,6 +113,40 @@ class App(tk.Tk):
     def _load_saved_callback(self):
         if set_maintenance_callback and self.config.get('maintenance_callback'):
             set_maintenance_callback(self.config['maintenance_callback'])
+
+    def _restore_saved_settings(self):
+        """将config.json中保存的参数恢复到UI控件"""
+        cfg = self.config
+        # 恢复目标
+        if 'targets' in cfg and hasattr(self,'target_vars'):
+            for k,v in cfg['targets'].items():
+                if k in self.target_vars:
+                    try: self.target_vars[k].set(v)
+                    except: pass
+        # 恢复触发阈值
+        if 'triggers' in cfg and hasattr(self,'trigger_vars'):
+            for k,v in cfg['triggers'].items():
+                if k in self.trigger_vars:
+                    try: self.trigger_vars[k].set(v)
+                    except: pass
+        # 恢复回调值
+        if 'callbacks' in cfg and hasattr(self,'callback_vars'):
+            for k,v in cfg['callbacks'].items():
+                if k in self.callback_vars:
+                    try: self.callback_vars[k].set(v)
+                    except: pass
+        # 恢复单价
+        if 'prices' in cfg and hasattr(self,'price_vars'):
+            for k,v in cfg['prices'].items():
+                if k in self.price_vars:
+                    try: self.price_vars[k].set(v)
+                    except: pass
+        # 恢复排序权重
+        if 'priority_weights' in cfg and hasattr(self,'priority_vars'):
+            for k,v in cfg['priority_weights'].items():
+                if k in self.priority_vars:
+                    try: self.priority_vars[k].set(v)
+                    except: pass
 
     def _setup_style(self):
         s = ttk.Style(); s.theme_use('clam')
@@ -1155,6 +1190,8 @@ class App(tk.Tk):
         cfg['triggers'] = {k:v.get() for k,v in self.trigger_vars.items()}
         cfg['callbacks'] = {k:v.get() for k,v in self.callback_vars.items()}
         cfg['prices'] = {k:v.get() for k,v in self.price_vars.items()}
+        if hasattr(self, 'priority_vars'):
+            cfg['priority_weights'] = {k:v.get() for k,v in self.priority_vars.items()}
         if set_maintenance_callback:
             cb = {}
             for ks, var in self.callback_vars.items():
