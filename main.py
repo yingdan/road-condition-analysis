@@ -1076,6 +1076,9 @@ class App(tk.Tk):
             for idx,dv in [('PCI',dpci),('PQI',dpqi),('RQI',drqi)]:
                 v = tk.IntVar(value=dv); self.trigger_vars[f'{m}_{pt}_{g}_{idx}'] = v
                 ttk.Entry(r, textvariable=v, width=6).pack(side='left')
+                en = tk.BooleanVar(value=True)
+                self.trigger_vars[f'{m}_{pt}_{g}_{idx}_启用'] = en
+                tk.Checkbutton(r, text='', variable=en, bg=THEME['card'], width=2).pack(side='left')
 
         tk.Label(card, text='【预防性养护】不满足路面改造时，条件触发', bg=THEME['card'],
                 fg=THEME['success'], font=('Microsoft YaHei', 9, 'bold')).pack(anchor='w', pady=(10,0))
