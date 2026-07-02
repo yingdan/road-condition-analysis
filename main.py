@@ -1576,35 +1576,41 @@ class App(tk.Tk):
                     total_cost = ydf['估算费用(万元)'].sum() if '估算费用(万元)' in ydf.columns else budget*2
                 else:
                     reform_km = dm_reform_km; prevent_km = dm_prevent_km; total_cost = budget*2
-                # 按需求分析优先级排序分配预算
-                rkm = 0; remain = budget
+                # 按需求分析优先级排序分配预算（改造+预防均考虑）
+                rkm = 0; pkm = 0; remain = budget
                 ydf_sorted = ydf.sort_values('优先级评分', ascending=False) if has_multi and cal_year in self.demand_multi_year else pd.DataFrame()
                 if not ydf_sorted.empty:
                     for _, row in ydf_sorted.iterrows():
                         cost = row.get('估算费用(万元)', 0)
-                        if cost <= remain and row.get('养护类型','') == '路面改造':
-                            remain -= cost; rkm += row.get('路段长度(km)', 0)
-                post_pqi = 90.0  # 简化：假设修复后达到90
+                        mt = row.get('养护类型','')
+                        if cost <= remain:
+                            remain -= cost
+                            if mt == '路面改造':
+                                rkm += row.get('路段长度(km)', 0)
+                            elif mt == '预防性养护':
+                                pkm += row.get('路段长度(km)', 0)
+                post_pqi = 90.0
                 gr = (total_km - reform_km + rkm) / total_km * 100 if total_km > 0 else 0
                 self.dp_tree.insert('','end',values=(f'{yr}年',f'{reform_km:.1f}',f'{rkm:.1f}',
-                    f'{prevent_km:.1f}',f'{rkm+prevent_km:.1f}',f'{budget}',f'{post_pqi:.1f}',
+                    f'{pkm:.1f}',f'{rkm+pkm:.1f}',f'{budget}',f'{post_pqi:.1f}',
                     f'{min(100,gr):.1f}%',f'{reform_km:.1f}',f'{92:.1f}'))
         else:
-            cols = ('年份','年初PQI','需求改造km','实际改造km','改造后PQI','路率%','剩余PQI<80','所需经费(万)')
+            # 无约束模式：直接使用需求分析数据
+            cols = ('年份','改造需求km','改造经费(万)','预防需求km','预防经费(万)','合计km','合计经费(万)')
             self.dp_tree['columns'] = cols
-            for c in cols: self.dp_tree.heading(c, text=c); self.dp_tree.column(c, width=105, anchor='center')
-            pqi_arr = segs['PQI'].values.copy(); total_cost = 0
+            for c in cols: self.dp_tree.heading(c, text=c); self.dp_tree.column(c, width=115, anchor='center')
             for yr in range(1, years+1):
-                pqi_arr = pqi_arr * np.exp(-k_arr)
-                pre_pqi = (pqi_arr * segs['路段长度km'].values).sum() / total_km
-                need = pqi_arr < 80; need_km = segs['路段长度km'].values[need].sum()
-                cost = (segs.loc[need,'路段长度km']*1000*segs.loc[need,'路面宽度']*319/10000).sum() if need.sum()>0 else 0
-                total_cost += cost
-                if need.sum()>0: pqi_arr[need] = 92
-                post_pqi = (pqi_arr * segs['路段长度km'].values).sum() / total_km
-                gr = segs['路段长度km'].values[pqi_arr>=80].sum() / total_km * 100
-                self.dp_tree.insert('','end',values=(f'{yr}年',f'{pre_pqi:.1f}',f'{need_km:.1f}',f'{need_km:.1f}',
-                    f'{post_pqi:.1f}',f'{gr:.1f}%',f'{0}',f'{cost:.0f}'))
+                cal_year = 2025 + yr
+                if has_multi and cal_year in self.demand_multi_year:
+                    ydf = self.demand_multi_year[cal_year]
+                    rkm = ydf[ydf['养护类型']=='路面改造']['路段长度(km)'].sum()
+                    rcost = ydf[ydf['养护类型']=='路面改造']['估算费用(万元)'].sum() if '估算费用(万元)' in ydf.columns else 0
+                    pkm = ydf[ydf['养护类型']=='预防性养护']['路段长度(km)'].sum()
+                    pcost = ydf[ydf['养护类型']=='预防性养护']['估算费用(万元)'].sum() if '估算费用(万元)' in ydf.columns else 0
+                else:
+                    rkm = dm_reform_km; rcost = 0; pkm = dm_prevent_km; pcost = 0
+                self.dp_tree.insert('','end',values=(f'{yr}年',f'{rkm:.1f}',f'{rcost:.0f}',
+                    f'{pkm:.1f}',f'{pcost:.0f}',f'{rkm+pkm:.1f}',f'{rcost+pcost:.0f}'))
         self.dp_text.delete('1.0','end')
         mode = '有资金约束' if use_constraint else '无约束全修'
         self.dp_text.insert('end',f'模式: {mode}\n')
