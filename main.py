@@ -1474,8 +1474,6 @@ class App(tk.Tk):
                  bg=THEME['accent'], fg='white', font=('Microsoft YaHei',10), padx=12, cursor='hand2').pack(side='right')
         tk.Button(c1, text='5年总量优化', command=self._run_total_optimization,
                  bg=THEME['warning'], fg='white', font=('Microsoft YaHei',9), padx=8, cursor='hand2').pack(side='right', padx=5)
-        tk.Button(c1, text='敏感性分析', command=self._run_sensitivity,
-                 bg=THEME['warning'], fg='white', font=('Microsoft YaHei',9), padx=8, cursor='hand2').pack(side='right', padx=3)
         cols_dp = ('年份','约束PQI','改造km','预防km','合计km','投入(万)','路率%','无约束PQI','无约束改造','无约束路率%')
         self.dp_tree = ttk.Treeview(card_opt, columns=cols_dp, show='headings', height=6)
         for ct in cols_dp: self.dp_tree.heading(ct, text=ct); self.dp_tree.column(ct, width=130, anchor='center')
@@ -1484,15 +1482,6 @@ class App(tk.Tk):
         card_conc = self._card(parent, '优化结论')
         self.dp_text = tk.Text(card_conc, height=5, wrap='word', font=('Microsoft YaHei',10))
         self.dp_text.pack(fill='both', expand=True)
-
-        # 敏感性分析结果
-        card_sens = self._card(parent, '目标可达性分析（预算↔PQI双向约束）')
-        self.sens_tree = ttk.Treeview(card_sens, columns=('年预算(万)','最终PQI','优良路率(%)','累计效益(万)','B/C','达标'), show='headings', height=5)
-        for c in ('年预算(万)','最终PQI','优良路率(%)','累计效益(万)','B/C','达标'):
-            self.sens_tree.heading(c, text=c); self.sens_tree.column(c, width=110, anchor='center')
-        self.sens_tree.pack(fill='both', expand=True)
-        self.sens_label = tk.Label(card_sens, text='', bg=THEME['card'], font=('Microsoft YaHei',9))
-        self.sens_label.pack(anchor='w', pady=(5,0))
 
         # 项目库
         card = self._card(parent, '工程项目库')
@@ -1695,160 +1684,6 @@ class App(tk.Tk):
         self.dp_text.insert('end',f'需求分析: 改造{dm_reform_km:.1f}km + 预防{dm_prevent_km:.1f}km = 合计{dm_reform_km+dm_prevent_km:.1f}km\n')
         self.status_var.set(f'动态规划完成 - {years}年')
 
-    def _run_sensitivity(self):
-        """目标可达性分析：不同预算水平下能达成的PQI和效益"""
-        df = self._get_data('全部')
-        if df.empty: return
-        import numpy as np
-        if '年份' in df.columns: df = df[df['年份']==df['年份'].max()]
-        for col in ['路段长度km','交通量','车道数','路面宽度','PQI','路龄']:
-            dv = {'路段长度km':1,'交通量':5000,'车道数':2,'路面宽度':7,'PQI':80,'路龄':5}[col]
-            if col not in df.columns: df[col] = dv
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(dv)
-        years = self.dp_years_var.get()
-        k_arr = self._calc_seg_decay(segs := df)
-        total_km = segs['路段长度km'].sum()
-        init_pqi = (segs['PQI'] * segs['路段长度km']).sum() / total_km
-        target_pqi = 92
-        if hasattr(self,'target_vars') and 'mid_国道_PQI' in self.target_vars:
-            target_pqi = self.target_vars['mid_国道_PQI'].get()
-
-        self.sens_tree.delete(*self.sens_tree.get_children())
-        budgets = [5000,10000,20000,30000,50000,80000,100000,150000,200000]
-        best_budget = None; reached_pqi = 0
-
-        for bud in budgets:
-            pqi_arr = segs['PQI'].values.copy()
-            pm = {v: i for i, v in enumerate(segs.index)}
-            cum_b = 0
-            for yr in range(1, years+1):
-                pqi_arr = pqi_arr * np.exp(-k_arr)
-                need = pqi_arr < 80; remain = bud
-                if need.sum() > 0:
-                    m = segs[need].copy()
-                    dp = pqi_arr[need]
-                    m['cost'] = m['路段长度km'] * 1000 * m['路面宽度'] * 319 / 10000
-                    m['benefit'] = m['交通量'] * 365 * m['路段长度km'] * (92-dp) * 0.015 * m['车道数'] / 10000
-                    m['bcr'] = m['benefit'] / m['cost']
-                    m = m.sort_values('bcr', ascending=False)
-                    for df_idx, row in m.iterrows():
-                        if row['cost'] <= remain:
-                            remain -= row['cost']; cum_b += row['benefit'] / 1.05 ** yr
-                            ap = pm.get(df_idx, -1)
-                            if ap >= 0: pqi_arr[ap] = 92
-            final_pqi = (pqi_arr * segs['路段长度km'].values).sum() / total_km
-            gr = segs['路段长度km'].values[pqi_arr>=80].sum() / total_km * 100
-            total_inv = bud * years
-            bcr = cum_b / total_inv if total_inv > 0 else 0
-            ok = '✓' if final_pqi >= target_pqi else '✗'
-            self.sens_tree.insert('','end',values=(f'{bud}',f'{final_pqi:.1f}',f'{gr:.1f}%',f'{cum_b:.0f}',f'{bcr:.2f}',ok))
-            if final_pqi >= target_pqi and best_budget is None:
-                best_budget = bud; reached_pqi = final_pqi
-
-        if best_budget:
-            self.sens_label.config(text=f'✓ 达成目标PQI≥{target_pqi}的最小年预算: {best_budget}万元 | 达标PQI: {reached_pqi:.1f}',
-                                   fg=THEME['success'])
-        else:
-            max_pqi = (pqi_arr * segs['路段长度km'].values).sum() / total_km if 'pqi_arr' in dir() else 0
-            self.sens_label.config(text=f'⚠ 当前最大预算{max(budgets)}万/年仍无法达标PQI≥{target_pqi} | 建议: 降低目标或增加预算',
-                                   fg=THEME['warning'])
-        self.status_var.set('敏感性分析完成')
-
-    def _run_total_optimization(self):
-        """针对短/中/长期3个目标，由数据驱动计算最优资金分配"""
-        df = self._get_data('全部')
-        if df.empty: return
-        import numpy as np
-        if '年份' in df.columns: df = df[df['年份']==df['年份'].max()]
-        for col in ['路段长度km','交通量','车道数','路面宽度','PQI','路龄']:
-            dv = {'路段长度km':1,'交通量':5000,'车道数':2,'路面宽度':7,'PQI':80,'路龄':5}[col]
-            if col not in df.columns: df[col] = dv
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(dv)
-        k_arr = self._calc_seg_decay(df); segs = df; total_km = segs['路段长度km'].sum()
-        pm = {v: i for i, v in enumerate(segs.index)}
-
-        targets = {}
-        if hasattr(self,'target_vars'):
-            for h, hname, hyears in [('short','短期(1年)',1),('mid','中期(5年)',5),('long','长期(10年)',10)]:
-                t = self.target_vars.get(f'{h}_国道_PQI', tk.IntVar(value=92)).get()
-                targets[h] = {'name': hname, 'years': hyears, 'target': t}
-
-        self.dp_tree.delete(*self.dp_tree.get_children())
-        self.dp_text.delete('1.0','end')
-        results = []
-
-        for hkey, info in targets.items():
-            years = info['years']; target_pqi = info['target']
-            # 第一步：不限制预算，每年修复全部PQI<80路段，记录自然年度需求
-            pqi_arr = segs['PQI'].values.copy()
-            yearly_natural = []   # 每年的自然需求(万元)
-
-            for yr in range(1, years+1):
-                pqi_arr = pqi_arr * np.exp(-k_arr)
-                need_mask = (pqi_arr < 80)
-                need_positions = np.where(need_mask)[0]
-                if len(need_positions) > 0:
-                    m = segs.iloc[need_positions]
-                    yr_cost = (m['路段长度km'] * 1000 * m['路面宽度'] * 319 / 10000).sum()
-                    yearly_natural.append(yr_cost)
-                    # 修复：PQI回调到92（允许后续年份再次衰减触发）
-                    pqi_arr[need_positions] = 92
-                else:
-                    yearly_natural.append(0)
-
-            # 第二步：自然需求就是数据驱动的最优分配比例
-            total_natural = sum(yearly_natural)
-            if total_natural > 0:
-                weights = [n / total_natural for n in yearly_natural]
-            else:
-                weights = [1.0/years] * years
-
-            # 第三步：用自然权重×总预算重新模拟（总预算=自然总需求×0.85）
-            total_budget = total_natural * 0.85
-            pqi_arr2 = segs['PQI'].values.copy()
-            yr_details = []
-            final_pqi = 0
-
-            for yr in range(1, years+1):
-                yr_budget = total_budget * weights[yr-1]
-                pqi_arr2 = pqi_arr2 * np.exp(-k_arr)
-                need = pqi_arr2 < 80; rkm = 0; remain = yr_budget
-                if need.sum() > 0:
-                    m = segs[need].copy()
-                    dp = pqi_arr2[need]
-                    m['cost'] = m['路段长度km'] * 1000 * m['路面宽度'] * 319 / 10000
-                    m['bcr'] = (m['交通量'] * 365 * m['路段长度km'] * (92-dp) * 0.015 * m['车道数']) / (m['cost']*10000)
-                    m = m.sort_values('bcr', ascending=False)
-                    for df_idx, row in m.iterrows():
-                        if row['cost'] <= remain:
-                            remain -= row['cost']; rkm += row['路段长度km']
-                            ap = pm.get(df_idx, -1)
-                            if ap >= 0: pqi_arr2[ap] = 92
-                yr_details.append((yr_budget, rkm, remain))
-            final_pqi = (pqi_arr2 * segs['路段长度km'].values).sum() / total_km
-            gr = segs['路段长度km'].values[pqi_arr2>=80].sum() / total_km * 100
-            ok = '✓' if final_pqi >= target_pqi else '✗'
-
-            # 年度明细表
-            pct_str = '→'.join(f'{w*100:.0f}%' for w in weights[:min(5, years)])
-            results.append((info['name'], f'PQI≥{target_pqi}', f'{total_budget:.0f}', f'{total_natural:.0f}',
-                           f'{int(yr_details[0][0])}', pct_str, f'{final_pqi:.1f}', f'{gr:.1f}%', ok))
-
-        # 输出结果到文本区（避免Treeview列冲突）
-        self.dp_text.delete('1.0','end')
-        self.dp_text.insert('end','═════════════════════════════════════\n')
-        self.dp_text.insert('end','  数据驱动总量优化（短/中/长期）\n')
-        self.dp_text.insert('end','═════════════════════════════════════\n\n')
-        sep = f'{"目标":<12}{"PQI要求":<8}{"推荐总预算":<14}{"自然需求":<14}{"首年预算":<12}{"终PQI":<8}{"优良路率":<10}{"达标"}\n'
-        self.dp_text.insert('end', sep)
-        for r in results:
-            self.dp_text.insert('end', f'{r[0]:<12}{r[1]:<8}{r[2]:<14}{r[3]:<14}{r[4]:<12}{r[6]:<8}{r[7]:<10}{r[8]}\n')
-        self.dp_text.insert('end','\n── 算法说明 ──\n')
-        self.dp_text.insert('end','第一步：不限制预算，每年修复全部PQI<80路段\n')
-        self.dp_text.insert('end','第二步：记录各年自然费用 → 得到数据驱动的分配比例\n')
-        self.dp_text.insert('end','第三步：总需求×85%压缩后按自然比例分配各年\n')
-        self.dp_text.insert('end',f'结果：前几年比例高(差路段多)，后几年比例低(趋于稳定)。\n')
-        self.status_var.set('总量优化完成')
 
     def _pool_refresh(self):
         self.pool_tree.delete(*self.pool_tree.get_children())
