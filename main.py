@@ -2397,195 +2397,115 @@ class App(tk.Tk):
     # ══════════════════════════════════════════════════════════════════════════
     #  页面5: 需求分析
     # ══════════════════════════════════════════════════════════════════════════
-    def _build_page5(self, parent):
-        self._section_title(parent, '🔍 养护需求分析')
-        self._section_sub(parent, '基于预测模型和养护对策，分析路网养护需求并排序')
+    def _build_page7(self, parent):
+        self._section_title(parent, '🌍 GIS地图展示')
+        self._section_sub(parent, '基于Folium交互式地图，按PQI/PCI/RQI着色展示路况')
 
-        card = self._card(parent, '分析参数')
-        r = self._row(card)
-        tk.Label(r, text='县份：', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left')
-        self.demand_county_var = tk.StringVar(value='全部')
-        self.demand_county_cb = ttk.Combobox(r, textvariable=self.demand_county_var, width=12, state='readonly', values=['全部'])
-        self.demand_county_cb.pack(side='left', padx=8)
-        tk.Label(r, text='目标年份：', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left', padx=(15,0))
-        self.demand_year_var = tk.StringVar(value='2026')
-        ttk.Combobox(r, textvariable=self.demand_year_var, values=[str(y) for y in range(2026,2031)], width=6).pack(side='left', padx=5)
-        tk.Button(r, text='▶ 执行需求分析', command=self._run_demand,
-                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 10), padx=12, cursor='hand2').pack(side='left', padx=15)
-        tk.Button(r, text='📋 优先排序', command=self._prioritize_demand,
-                 font=('Microsoft YaHei', 9), padx=8).pack(side='left', padx=5)
-        tk.Button(r, text='📥 导出', command=self._export_demand,
-                 font=('Microsoft YaHei', 9), padx=8).pack(side='right')
+        card = self._card(parent, '地图参数', expand=True)
+        r = self._row(card, 5)
+        tk.Label(r, text='县份', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left')
+        self.map_county_var = tk.StringVar(value='全部')
+        self.map_county_cb = ttk.Combobox(r, textvariable=self.map_county_var, width=10, state='readonly', values=['全部'])
+        self.map_county_cb.pack(side='left', padx=8)
+        tk.Label(r, text='年份', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left', padx=(15,0))
+        self.map_year_var = tk.StringVar(value='2025')
+        ttk.Combobox(r, textvariable=self.map_year_var, width=6, values=['2021','2022','2023','2024','2025']).pack(side='left', padx=5)
+        tk.Label(r, text='着色', bg=THEME['card'], font=('Microsoft YaHei', 9)).pack(side='left', padx=(15,0))
+        self.map_color_var = tk.StringVar(value='PQI')
+        ttk.Combobox(r, textvariable=self.map_color_var, width=6, values=['PQI','PCI','RQI']).pack(side='left', padx=5)
+        tk.Button(r, text='🗺️ 生成地图', command=self._gen_map,
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 10), padx=12, cursor='hand2').pack(side='left', padx=20)
 
-        # 各线路加权均值表（年份横向）
-        card_route = self._card(parent)
-        cols_route = ('路线编码','里程(km)', '26PQI','26PCI','26RQI','27PQI','27PCI','27RQI','28PQI','28PCI','28RQI','29PQI','29PCI','29RQI','30PQI','30PCI','30RQI')
-        self.route_avg_tree = ttk.Treeview(card_route, columns=cols_route, show='headings', height=6)
-        for c in cols_route: self.route_avg_tree.heading(c, text=c); self.route_avg_tree.column(c, width=55, anchor='center')
-        self.route_avg_tree.column('路线编码', width=70); self.route_avg_tree.column('里程(km)', width=60)
-        self.route_avg_tree.pack(fill='both', expand=True)
+        self.map_text = tk.Text(card, height=10, wrap='word', font=('Microsoft YaHei', 9))
+        self.map_text.pack(fill='both', expand=True, pady=(10,0))
+        self.map_text.insert('1.0','点击"生成地图"创建交互式路况地图\n\n需要安装依赖：pip install folium\n地图将生成为HTML文件，可在浏览器中打开查看。')
 
-        card2 = self._card(parent, '养护需求列表', 3, expand=True)
-        cols = ('路线编码','路段起点','路段终点','里程(km)','当前PQI','预测PQI','养护类型','触发条件','费用(万元)','优先级')
-        self.demand_tree = ttk.Treeview(card2, columns=cols, show='headings', height=12)
-        ws = {'路线编码':85,'路段起点':65,'路段终点':65,'里程(km)':60,'当前PQI':60,'预测PQI':60,'养护类型':80,'触发条件':180,'费用(万元)':75,'优先级':55}
-        for c in cols: self.demand_tree.heading(c, text=c); self.demand_tree.column(c, width=ws.get(c,70), anchor='center')
-        sv = ttk.Scrollbar(card2, orient='vertical', command=self.demand_tree.yview)
-        sh = ttk.Scrollbar(card2, orient='horizontal', command=self.demand_tree.xview)
-        self.demand_tree.configure(yscrollcommand=sv.set, xscrollcommand=sh.set)
-        self.demand_tree.pack(side='left', fill='both', expand=True)
-        sv.pack(side='right', fill='y'); sh.pack(side='bottom', fill='x')
-        self.demand_summary = tk.Label(parent, text='', bg=THEME['bg'], fg=THEME['text'], font=('Microsoft YaHei', 9))
-        self.demand_summary.pack(anchor='w', padx=20, pady=3)
-
-        # 多年需求汇总表
-        cols_yr = ('年份','改造(km)','预防(km)','日常(km)','合计(km)')
-        self.demand_year_tree = ttk.Treeview(parent, columns=cols_yr, show='headings', height=6)
-        for c in cols_yr: self.demand_year_tree.heading(c, text=c); self.demand_year_tree.column(c, width=90, anchor='center')
-        self.demand_year_tree.pack(fill='x', padx=20, pady=5)
-
-    def _run_demand(self):
-        df = self._get_data(self.demand_county_var.get())
-        if df.empty: return
-        if '年份' in df.columns: df = df[df['年份']==df['年份'].max()]
-        ty = int(self.demand_year_var.get())
+    def _db_connect(self):
         try:
-            from src.decision.performance_models import calibrate_exponential_model
-            all_df = pd.concat(self.data_cache.values(), ignore_index=True)
-            dr = calibrate_exponential_model(all_df)
-            # 确保PCI/RQI列存在
-            for c in ['PCI','RQI']:
-                if c not in df.columns: df[c] = df['PQI'] if 'PQI' in df.columns else 80
-            enabled_flags = {}
-            if hasattr(self,'trigger_vars'):
-                for k,v in self.trigger_vars.items():
-                    if '_启用' in k:
-                        enabled_flags[k] = bool(v.get())
-            print(f'[LOG] enabled_flags count={len(enabled_flags)}')
-            if enabled_flags:
-                pqi_on = enabled_flags.get('路面改造_沥青路面_一级公路_PQI_启用', True)
-                print(f'[LOG] PQI_启用(沥青/一级)={pqi_on}')
-            result = analyze_demand(df, target_year=ty, decay_rates=dr, enabled=enabled_flags)
-            def cc(r):
-                ln = r.get('路段长度(km)',1); mt = r.get('养护类型','日常养护'); pt = r.get('路面类型','沥青路面')
-                pk = f'{mt}_{pt}'
-                pr = self.price_vars[pk].get() if hasattr(self,'price_vars') and pk in self.price_vars else {'路面改造_沥青路面':319,'预防性养护_沥青路面':160,'日常养护_沥青路面':30}.get(pk,300)
-                return round(ln*1000*7*pr/10000,2)
-            result['路段长度(km)'] = result.apply(lambda r: r.get('路段长度(km)',1), axis=1)
-            result['估算费用(万元)'] = result.apply(cc, axis=1)
-            result['养护类型'] = result['养护类型'].fillna('日常养护')
-            self.demand_result_df = result
-            import numpy as np
-            base_df = df.copy()
-            self.demand_multi_year = {}
-            self.demand_snapshots = {}  # 每年末的base_df快照（含PQI/PCI/RQI）
-            county_name = self.demand_county_var.get() if hasattr(self,'demand_county_var') else '全部'
-            prev_result = None
-            for yr in range(ty, 2031):
-                # 上年修复路段根据对策模型回调PQI（衰减由analyze_demand内部处理）
-                cb = {}
-                if hasattr(self,'callback_vars'):
-                    for k,v in self.callback_vars.items(): cb[k] = v.get()
-                if prev_result is not None and not prev_result.empty and yr > ty:
-                    # 所有路段 PQI/PCI/RQI 衰减1年
-                    for idx in base_df.index:
-                        ptype = str(base_df.at[idx,'路面类型']); tgrade = str(base_df.at[idx,'技术等级'])
-                        dk = dr.get((ptype,tgrade),{})
-                        for col in ['PQI','PCI','RQI']:
-                            if col in base_df.columns:
-                                k_val = dk.get(col,0.015) or 0.015
-                                base_df.at[idx,col] = max(0, base_df.at[idx,col]*np.exp(-k_val))
-                    # 修复路段回调
-                    for _, row in prev_result.iterrows():
-                        mt = row.get('养护类型',''); pt = row.get('路面类型','沥青路面')
-                        if mt in ('路面改造','预防性养护'):
-                            m = ((base_df['路线编码']==row['路线编码'])&(base_df['路段起点'].astype(str)==str(row['路段起点']))&(base_df['路段终点'].astype(str)==str(row['路段终点'])))
-                            if m.any():
-                                for col in ['PQI','PCI','RQI']:
-                                    new_val = cb.get(f'{mt}_{pt}_{col}', 92 if mt=='路面改造' else 89)
-                                    base_df.loc[m,col] = new_val
-                yr_df = analyze_demand(base_df, target_year=2026, decay_rates=dr, enabled=enabled_flags)
-                yr_df['路段长度(km)'] = yr_df.apply(lambda r: r.get('路段长度(km)',1), axis=1)
-                yr_df['养护类型'] = yr_df['养护类型'].fillna('日常养护')
-                # 计算费用（使用对策模型单价）
-                def calc(row):
-                    ln=row.get('路段长度(km)',1); mt=row.get('养护类型','日常养护'); pt=row.get('路面类型','沥青路面')
-                    tg=row.get('技术等级','二级公路')
-                    type_map={'路面改造':'结构性修复','预防性养护':'预防养护'}
-                    mt_k=type_map.get(mt,'日常养护')
-                    tg_k='一级' if '一' in str(tg) else ('二级' if '二' in str(tg) else '三级')
-                    pk=f'{mt_k}_{pt}_{tg_k}'
-                    pr=300
-                    if hasattr(self,'price_vars') and pk in self.price_vars: pr=self.price_vars[pk].get()
-                    return round(ln*1000*7*pr/10000,2)
-                yr_df['估算费用(万元)'] = yr_df.apply(calc, axis=1)
-                self.demand_multi_year[yr] = yr_df
-                self.demand_snapshots[yr] = base_df.copy()  # 快照当前base_df
-                prev_result = yr_df
-                rk = yr_df[yr_df['养护类型']=='路面改造']['路段长度(km)'].sum()
-                pk = yr_df[yr_df['养护类型']=='预防性养护']['路段长度(km)'].sum()
-                dk = yr_df[yr_df['养护类型']=='日常养护']['路段长度(km)'].sum() if '日常养护' in yr_df['养护类型'].values else 0
-                print(f'[DEMAND-{county_name}] {yr}: reform={rk:.1f}km prevent={pk:.1f}km (total={len(yr_df)}条)')
-            # 填充多年汇总表
-            self.demand_year_tree.delete(*self.demand_year_tree.get_children())
-            for yr in sorted(self.demand_multi_year.keys()):
-                ydf = self.demand_multi_year[yr]
-                rk = ydf[ydf['养护类型']=='路面改造']['路段长度(km)'].sum()
-                pk = ydf[ydf['养护类型']=='预防性养护']['路段长度(km)'].sum()
-                dk = ydf[ydf['养护类型']=='日常养护']['路段长度(km)'].sum() if '日常养护' in ydf['养护类型'].values else 0
-                self.demand_year_tree.insert('','end',values=(f'{yr}年',f'{rk:.1f}',f'{pk:.1f}',f'{dk:.1f}',f'{rk+pk+dk:.1f}'))
-            # 各线路加权均值（年份横向）
-            self.route_avg_tree.delete(*self.route_avg_tree.get_children())
-            for route, group in df.groupby('路线编码'):
-                rd0 = group; t = rd0['路段长度km'].sum()
-                if t <= 0: continue
-                vals = [route, f'{t:.1f}']
-                for yr in range(ty, 2031):
-                    if yr in self.demand_snapshots:
-                        snap = self.demand_snapshots[yr]
-                        sr = snap[snap['路线编码']==route]
-                        for col in ['PQI','PCI','RQI']:
-                            if col in sr.columns and sr['路段长度km'].sum() > 0:
-                                wv = (sr[col]*sr['路段长度km']).sum()/sr['路段长度km'].sum()
-                                vals.append(f'{wv:.1f}')
-                            else:
-                                vals.append('-')
-                self.route_avg_tree.insert('','end',values=vals)
-            self._refresh_demand_tree(result, ty)
-            def km_of(df, mt):
-                s = df[df['养护类型']==mt]['路段长度(km)'].sum() if '路段长度(km)' in df.columns else len(df[df['养护类型']==mt])
-                return f'{s:.1f}km'
-            self.demand_summary.config(text=f'总路段：{len(result)}条({result["路段长度(km)"].sum() if "路段长度(km)" in result.columns else 0:.1f}km) | 路面改造：{len(result[result["养护类型"]=="路面改造"])}条({km_of(result,"路面改造")}) | 预防性养护：{len(result[result["养护类型"]=="预防性养护"])}条({km_of(result,"预防性养护")}) | 日常养护：{len(result[result["养护类型"]=="日常养护"])}条({km_of(result,"日常养护")})')
-            self.mark_step_done(6)
-            self.status_var.set(f'需求分析完成 — {len(result)}个需求')
+            from src.database import DatabaseManager, DatabaseConfig
+            self.db_mgr = DatabaseManager(DatabaseConfig(
+                host=self.db_host_var.get(), port=int(self.db_port_var.get()),
+                database=self.db_db_var.get(), user=self.db_user_var.get(), password=self.db_pass_var.get()))
+            if self.db_mgr.connect():
+                self.db_status.config(text='✓ 已连接', fg=THEME['success'])
+                self.db_text.insert('end','数据库连接成功\n')
         except Exception as e:
-            messagebox.showerror('错误', str(e))
+            self.db_text.insert('end',f'连接失败：{e}\n')
 
-    def _prioritize_demand(self):
-        if self.demand_result_df is None or self.demand_result_df.empty: return
-        from src.decision.maintenance_demand import prioritize_demand
-        self.demand_result_df = prioritize_demand(self.demand_result_df)
-        self._refresh_demand_tree(self.demand_result_df, int(self.demand_year_var.get()))
-        self.status_var.set('需求已按优先级排序')
+    def _db_init(self):
+        if not hasattr(self,'db_mgr'): return
+        from src.database import RoadDataSchema
+        if RoadDataSchema.initialize_database(self.db_mgr): self.db_text.insert('end','表结构初始化完成\n')
 
-    def _refresh_demand_tree(self, result, ty):
-        self.demand_tree.delete(*self.demand_tree.get_children())
-        for _, row in result.iterrows():
-            self.demand_tree.insert('','end',values=(
-                row.get('路线编码',''), row.get('路段起点',''), row.get('路段终点',''),
-                f"{row.get('路段长度(km)',1):.2f}", f"{row.get('当前PQI',0):.1f}",
-                f"{row.get(f'{ty}年预测PQI',0):.1f}", row.get('养护类型',''),
-                row.get('触发原因',''), f"{row.get('估算费用(万元)',0):.2f}",
-                f"{row.get('优先级评分',0):.1f}"))
+    def _db_import(self):
+        if not hasattr(self,'db_mgr'): return
+        from src.database import RoadDataImporter
+        fm = {y:v.get().strip() for y,v in self.file_vars.items() if v.get().strip() and os.path.exists(v.get().strip())}
+        imp = RoadDataImporter(self.db_mgr); s,p = imp.import_excel_data(fm)
+        self.db_text.insert('end',f'导入：{s}路段, {p}PQI记录\n')
 
-    def _export_demand(self):
-        if self.demand_result_df is None or self.demand_result_df.empty:
-            messagebox.showwarning('提示','请先执行需求分析'); return
-        path = filedialog.asksaveasfilename(title='导出', defaultextension='.xlsx', filetypes=[('Excel','*.xlsx')])
-        if path: self.demand_result_df.to_excel(path, index=False); messagebox.showinfo('成功','已导出')
+    def _db_sync(self):
+        """同步：从Excel加载数据并导入数据库"""
+        if not hasattr(self,'db_mgr'):
+            messagebox.showwarning('提示','请先连接数据库'); return
+        if not self.data_cache:
+            messagebox.showwarning('提示','请先加载Excel数据'); return
+        self._db_import()
+        messagebox.showinfo('同步完成', 'Excel数据已同步到数据库')
+        self.db_text.insert('end','数据同步完成\n')
+
+    def _gen_map(self):
+        if not self.data_cache: return
+        try:
+            from src.gis_map import GISMapGenerator
+            g = GISMapGenerator()
+            county = self.map_county_var.get()
+            df = pd.concat(self.data_cache.values(), ignore_index=True) if county=='全部' else self.data_cache.get(county, pd.DataFrame())
+            year = self.map_year_var.get()
+            if year and '年份' in df.columns: df = df[df['年份']==int(year)]
+            bmap = {'五华':(23.78,115.75),'蕉岭':(24.67,116.17),'和平':(24.47,114.94),'东源':(23.78,114.74)}
+            blat, blon = bmap.get(county, (23.88,115.36))
+            if 'lat_start' not in df.columns:
+                df['lat_start'] = [blat+random.uniform(-0.05,0.05) for _ in range(len(df))]
+                df['lon_start'] = [blon+random.uniform(-0.05,0.05) for _ in range(len(df))]
+                df['lat_end'] = [blat+random.uniform(-0.05,0.05) for _ in range(len(df))]
+                df['lon_end'] = [blon+random.uniform(-0.05,0.05) for _ in range(len(df))]
+            m = g.add_road_segments(df, color_by=self.map_color_var.get().lower())
+            if m:
+                path = g.save_map(m, f'map_{county}_{year}.html')
+                self.map_text.delete('1.0','end')
+                self.map_text.insert('1.0',f'地图已生成：{path}\n{len(df)}个路段\n\n在文件管理器中打开查看')
+                self.status_var.set('地图生成完成')
+            else:
+                self.map_text.insert('end','需要安装：pip install folium\n')
+        except Exception as e:
+            self.map_text.insert('end',f'错误：{e}\n')
 
     # ══════════════════════════════════════════════════════════════════════════
-    
+    #  工具方法
+    # ══════════════════════════════════════════════════════════════════════════
+    def _get_data(self, county):
+        if not self.data_cache:
+            messagebox.showwarning('提示','请先加载数据'); return pd.DataFrame()
+        if county == '全部': return pd.concat(self.data_cache.values(), ignore_index=True)
+        return self.data_cache.get(county, pd.DataFrame())
+
+    def _export_tree(self, tree):
+        if not tree.get_children(): return
+        path = filedialog.asksaveasfilename(title='导出', defaultextension='.xlsx', filetypes=[('Excel','*.xlsx')])
+        if path:
+            rows = [tree.item(it,'values') for it in tree.get_children()]
+            pd.DataFrame(rows, columns=tree['columns']).to_excel(path, index=False)
+            messagebox.showinfo('成功','已导出')
+
+    def _df_to_tree(self, tree, df):
+        tree.delete(*tree.get_children())
+        tree['columns'] = list(df.columns); tree['show'] = 'headings'
+        for c in df.columns:
+            tree.heading(c, text=c); tree.column(c, width=90, anchor='center')
+        for _, row in df.iterrows():
+            tree.insert('','end',values=[f'{v:.2f}' if isinstance(v,float) else str(v) for v in row])
+
 
 if __name__ == '__main__':
     app = App()
