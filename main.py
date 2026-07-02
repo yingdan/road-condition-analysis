@@ -1480,8 +1480,28 @@ class App(tk.Tk):
         self.dp_tree.pack(fill='both', expand=True, pady=(5,0))
 
         card_conc = self._card(parent, '优化结论')
-        self.dp_text = tk.Text(card_conc, height=5, wrap='word', font=('Microsoft YaHei',10))
+        self.dp_text = tk.Text(card_conc, height=3, wrap='word', font=('Microsoft YaHei',10))
         self.dp_text.pack(fill='both', expand=True)
+
+        # 年度项目库
+        card_proj = self._card(parent, '年度项目库（路面改造+预防养护）', expand=True)
+        rp = self._row(card_proj)
+        tk.Label(rp, text='生成年份：', bg=THEME['card'], font=('Microsoft YaHei',9)).pack(side='left')
+        self.proj_year_var = tk.IntVar(value=2026)
+        for y in range(2026,2031):
+            tk.Radiobutton(rp, text=str(y), variable=self.proj_year_var, value=y,
+                          bg=THEME['card']).pack(side='left', padx=5)
+        tk.Button(rp, text='生成项目库', command=self._gen_year_projects,
+                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei',9), padx=10, cursor='hand2').pack(side='left', padx=10)
+        tk.Button(rp, text='导出Excel', command=lambda: self._export_tree(self.proj_detail_tree),
+                 font=('Microsoft YaHei',9)).pack(side='left', padx=5)
+        cols_pd = ('路线','起点桩号','终点桩号','长度(km)','路面类型','技术等级','PQI','PCI','RQI','养护类型')
+        self.proj_detail_tree = ttk.Treeview(card_proj, columns=cols_pd, show='headings', height=8)
+        for c in cols_pd: self.proj_detail_tree.heading(c, text=c); self.proj_detail_tree.column(c, width=75, anchor='center')
+        sv_pd = ttk.Scrollbar(card_proj, orient='vertical', command=self.proj_detail_tree.yview)
+        self.proj_detail_tree.configure(yscrollcommand=sv_pd.set)
+        self.proj_detail_tree.pack(side='left', fill='both', expand=True)
+        sv_pd.pack(side='right', fill='y')
 
         # 项目库
         card = self._card(parent, '工程项目库')
@@ -1684,6 +1704,22 @@ class App(tk.Tk):
         self.dp_text.insert('end',f'需求分析: 改造{dm_reform_km:.1f}km + 预防{dm_prevent_km:.1f}km = 合计{dm_reform_km+dm_prevent_km:.1f}km\n')
         self.status_var.set(f'动态规划完成 - {years}年')
 
+
+    def _gen_year_projects(self):
+        yr = self.proj_year_var.get()
+        if hasattr(self,'demand_multi_year') and yr in self.demand_multi_year:
+            ydf = self.demand_multi_year[yr]
+            self.proj_detail_tree.delete(*self.proj_detail_tree.get_children())
+            for _, row in ydf.iterrows():
+                mt = row.get('养护类型','')
+                if mt in ('路面改造','预防性养护'):
+                    self.proj_detail_tree.insert('','end',values=(
+                        row.get('路线编码',''), row.get('路段起点',''), row.get('路段终点',''),
+                        f'{row.get("路段长度(km)",1):.3f}', row.get('路面类型',''), row.get('技术等级',''),
+                        f'{row.get("当前PQI",0):.1f}', '-', '-', mt))
+            self.status_var.set(f'{yr}年项目库已生成')
+        else:
+            messagebox.showwarning('提示','请先执行需求分析')
 
     def _pool_refresh(self):
         self.pool_tree.delete(*self.pool_tree.get_children())
