@@ -1520,6 +1520,8 @@ class App(tk.Tk):
         county = self.dp_county_var.get() if hasattr(self,'dp_county_var') else '全部'
         df = self._get_data(county)
         if df.empty: messagebox.showwarning('提示','请先加载数据'); return
+        if self.demand_result_df is None or self.demand_result_df.empty:
+            messagebox.showwarning('提示','请先在需求分析中执行分析'); return
         import numpy as np
         self.dp_county_label.config(text=f'当前: {county}')
         if '年份' in df.columns: df = df[df['年份']==df['年份'].max()]
@@ -1528,77 +1530,66 @@ class App(tk.Tk):
             if col not in df.columns: df[col] = dv
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(dv)
         years = self.dp_years_var.get(); base_budget = self.budget_var.get()
-        growth = self.dp_growth_var.get() / 100
         use_constraint = self.dp_constraint_var.get() if hasattr(self,'dp_constraint_var') else True
         segs = df; total_km = segs['路段长度km'].sum()
         k_arr = self._calc_seg_decay(segs)
         pm = {v: i for i, v in enumerate(segs.index)}
-        # 第一年需求来源：优先使用需求分析结果中的改造里程
-        reform_km_demand = 0
-        if self.demand_result_df is not None and not self.demand_result_df.empty:
-            reform_km_demand = self.demand_result_df[self.demand_result_df['养护类型']=='路面改造']['路段长度(km)'].sum() if '路段长度(km)' in self.demand_result_df.columns else 0
+        dm = self.demand_result_df  # 需求分析结果
         self.dp_tree.delete(*self.dp_tree.get_children())
 
         if use_constraint:
-            # 双轨：约束+无约束
-            cols = ('年份','约束PQI','改造km','预防km','合计km','投入(万)','路率%','无约束PQI','无约束改造','无约束路率%')
+            cols = ('年份','需求改造km','实际改造km','预防km','合计km','投入(万)','年末PQI','路率%','无约束改造km','无约束PQI')
             self.dp_tree['columns'] = cols
-            for c in cols: self.dp_tree.heading(c, text=c); self.dp_tree.column(c, width=95, anchor='center')
-            pqi_con = segs['PQI'].values.copy(); pqi_unc = segs['PQI'].values.copy()
+            for c in cols: self.dp_tree.heading(c, text=c); self.dp_tree.column(c, width=93, anchor='center')
+            pqi_arr = segs['PQI'].values.copy()
             for yr in range(1, years+1):
-                budget = int(base_budget * (1 + growth) ** (yr - 1))
-                pqi_con = pqi_con * np.exp(-k_arr)
-                need = pqi_con < 80
-                # 第一年优先使用需求分析结果，后续年份用模拟值
-                if yr == 1 and reform_km_demand > 0:
-                    needed_km = reform_km_demand
-                else:
-                    needed_km = segs['路段长度km'].values[need].sum()
-                rkm = 0; pkm = 0; remain = budget
+                budget = int(base_budget * (1 + 0) ** (yr - 1))  # 固定预算
+                pqi_arr = pqi_arr * np.exp(-k_arr)
+                # 用需求分析结果：筛选当前PQI<80的路段，按需求分析的优先级排序
+                need = pqi_arr < 80
+                demand_km = segs['路段长度km'].values[need].sum()  # 需要改造的
+                rkm = 0; remain = budget
                 if need.sum() > 0:
-                    m = segs[need].copy(); dp = pqi_con[need]
+                    m = segs[need].copy()
                     m['cost'] = m['路段长度km'] * 1000 * m['路面宽度'] * 319 / 10000
-                    m['benefit'] = m['交通量'] * 365 * m['路段长度km'] * (92-dp) * 0.015 * m['车道数'] / 10000
-                    m['bcr'] = m['benefit'] / m['cost']
-                    m = m.sort_values('bcr', ascending=False)
+                    # 优先使用需求分析的优先级评分
+                    if '路线编码' in m.columns and '路线编码' in dm.columns:
+                        route_priority = dm.groupby('路线编码')['优先级评分'].mean()
+                        m['priority'] = m['路线编码'].map(route_priority).fillna(50)
+                    else:
+                        dp_val = pqi_arr[need]
+                        m['priority'] = (92 - dp_val) * 10  # PQI越低优先级越高
+                    m = m.sort_values('priority', ascending=False)
                     for df_idx, row in m.iterrows():
                         if row['cost'] <= remain:
                             remain -= row['cost']; rkm += row['路段长度km']
                             ap = pm.get(df_idx, -1)
-                            if ap >= 0: pqi_con[ap] = 92
-                con_pqi = (pqi_con * segs['路段长度km'].values).sum() / total_km
-                con_gr = segs['路段长度km'].values[pqi_con>=80].sum() / total_km * 100
-                pqi_unc = pqi_unc * np.exp(-k_arr)
-                nu = pqi_unc < 80; urkm = segs['路段长度km'].values[nu].sum()
-                if nu.sum() > 0: pqi_unc[nu] = 92
-                unc_pqi = (pqi_unc * segs['路段长度km'].values).sum() / total_km
-                unc_gr = segs['路段长度km'].values[pqi_unc>=80].sum() / total_km * 100
-                self.dp_tree.insert('','end',values=(f'{yr}年',f'{con_pqi:.1f}',f'{rkm:.1f}',f'{pkm:.1f}',
-                    f'{rkm+pkm:.1f}',f'{budget}',f'{con_gr:.1f}%',f'{unc_pqi:.1f}',f'{urkm:.1f}',f'{unc_gr:.1f}%'))
+                            if ap >= 0: pqi_arr[ap] = 92
+                post_pqi = (pqi_arr * segs['路段长度km'].values).sum() / total_km
+                gr = segs['路段长度km'].values[pqi_arr>=80].sum() / total_km * 100
+                # 无约束对照：本年度需求里程
+                self.dp_tree.insert('','end',values=(f'{yr}年',f'{demand_km:.1f}',f'{rkm:.1f}',
+                    f'0',f'{rkm:.1f}',f'{budget}',f'{post_pqi:.1f}',f'{gr:.1f}%',f'{demand_km:.1f}',f'{92:.1f}'))
         else:
-            # 无约束详细模式
-            cols = ('年份','年初PQI','PQI<80里程','改造里程','改造后PQI','优良路率%','剩余PQI<80','剩余经费')
+            cols = ('年份','年初PQI','需求改造km','实际改造km','改造后PQI','路率%','剩余PQI<80','所需经费(万)')
             self.dp_tree['columns'] = cols
             for c in cols: self.dp_tree.heading(c, text=c); self.dp_tree.column(c, width=105, anchor='center')
-            pqi_arr = segs['PQI'].values.copy()
-            total_cost = 0
+            pqi_arr = segs['PQI'].values.copy(); total_cost = 0
             for yr in range(1, years+1):
                 pqi_arr = pqi_arr * np.exp(-k_arr)
                 pre_pqi = (pqi_arr * segs['路段长度km'].values).sum() / total_km
-                need = pqi_arr < 80
-                need_km = segs['路段长度km'].values[need].sum()
-                cost = (segs.loc[need,'路段长度km'] * 1000 * segs.loc[need,'路面宽度'] * 319 / 10000).sum() if need.sum()>0 else 0
+                need = pqi_arr < 80; need_km = segs['路段长度km'].values[need].sum()
+                cost = (segs.loc[need,'路段长度km']*1000*segs.loc[need,'路面宽度']*319/10000).sum() if need.sum()>0 else 0
                 total_cost += cost
-                if need.sum() > 0: pqi_arr[need] = 92
+                if need.sum()>0: pqi_arr[need] = 92
                 post_pqi = (pqi_arr * segs['路段长度km'].values).sum() / total_km
                 gr = segs['路段长度km'].values[pqi_arr>=80].sum() / total_km * 100
-                # 剩余PQI<80
-                remain_need = segs['路段长度km'].values[pqi_arr<80].sum()
                 self.dp_tree.insert('','end',values=(f'{yr}年',f'{pre_pqi:.1f}',f'{need_km:.1f}',f'{need_km:.1f}',
-                    f'{post_pqi:.1f}',f'{gr:.1f}%',f'{remain_need:.1f}',f'{cost:.0f}'))
+                    f'{post_pqi:.1f}',f'{gr:.1f}%',f'{0}',f'{cost:.0f}'))
         self.dp_text.delete('1.0','end')
         mode = '有资金约束' if use_constraint else '无约束全修'
-        self.dp_text.insert('end',f'模式: {mode} | {years}年 | 总里程{total_km:.1f}km\n')
+        reform_total = dm[dm['养护类型']=='路面改造']['路段长度(km)'].sum() if '路段长度(km)' in dm.columns else 0
+        self.dp_text.insert('end',f'模式: {mode} | 需求分析改造总里程: {reform_total:.1f}km\n')
         self.status_var.set(f'动态规划完成 - {years}年')
 
     def _run_sensitivity(self):
