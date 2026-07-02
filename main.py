@@ -1313,24 +1313,32 @@ class App(tk.Tk):
             county_name = self.demand_county_var.get() if hasattr(self,'demand_county_var') else '全部'
             prev_result = result
             for yr in range(ty+1, 2031):
-                # 根据上年结果更新PQI：修复路段PQI=92, 其余自然衰减
-                if not prev_result.empty and '路段长度(km)' in prev_result.columns:
-                    pqi_map = {}
+                # 读取对策模型的回调值
+                cb = {}
+                if hasattr(self,'callback_vars'):
+                    for k,v in self.callback_vars.items():
+                        cb[k] = v.get()
+                # 第一步：所有路段自然衰减
+                for idx in base_df.index:
+                    ptype = str(base_df.at[idx,'路面类型'])
+                    tgrade = str(base_df.at[idx,'技术等级'])
+                    k_val = dr.get((ptype, tgrade), {}).get('PQI', 0.015) or 0.015
+                    base_df.at[idx,'PQI'] = max(0, base_df.at[idx,'PQI'] * np.exp(-k_val))
+                # 第二步：上年修复路段根据对策模型回调
+                if not prev_result.empty:
                     for _, row in prev_result.iterrows():
-                        key = (row.get('路线编码',''), row.get('路段起点',''), row.get('路段终点',''))
+                        key = (row.get('路线编码',''), str(row.get('路段起点','')), str(row.get('路段终点','')))
                         mt = row.get('养护类型','')
-                        if mt == '路面改造':
-                            pqi_map[key] = 92
-                        elif mt == '预防性养护':
-                            pqi_map[key] = 89
-                    for idx in base_df.index:
-                        key = (base_df.at[idx,'路线编码'], str(base_df.at[idx,'路段起点']), str(base_df.at[idx,'路段终点']))
-                        if key in pqi_map:
-                            base_df.at[idx,'PQI'] = pqi_map[key]
-                        else:
-                            # 自然衰减
-                            k_val = dr.get((str(base_df.at[idx,'路面类型']), str(base_df.at[idx,'技术等级'])), {}).get('PQI', 0.015) or 0.015
-                            base_df.at[idx,'PQI'] = max(0, base_df.at[idx,'PQI'] * np.exp(-k_val))
+                        pt = row.get('路面类型','沥青路面')
+                        if mt in ('路面改造','预防性养护'):
+                            cb_key = f'{mt}_{pt}_PQI'
+                            new_pqi = cb.get(cb_key, 92 if mt=='路面改造' else 89)
+                            # 找到base_df中对应行并更新
+                            mask = ((base_df['路线编码']==key[0]) &
+                                    (base_df['路段起点'].astype(str)==key[1]) &
+                                    (base_df['路段终点'].astype(str)==key[2]))
+                            if mask.any():
+                                base_df.loc[mask, 'PQI'] = new_pqi
                 yr_df = analyze_demand(base_df, target_year=yr, decay_rates=dr, enabled=enabled_flags)
                 yr_df['路段长度(km)'] = yr_df.apply(lambda r: r.get('路段长度(km)',1), axis=1)
                 yr_df['养护类型'] = yr_df['养护类型'].fillna('日常养护')
