@@ -1680,20 +1680,21 @@ class App(tk.Tk):
                     f'{yd["prevent"]:.1f}',f'{yd["rcost"]:.0f}',f'{92:.0f}',f'{90:.1f}%'))
             self.dp_text.delete('1.0','end')
             self.dp_text.insert('end',f'资金均衡优化 | 均衡度{balance}% | 5年总需求改造{total_reform:.1f}km')
-            # 生成优化后的项目库
+            # 优化后项目库：直接从均衡分配循环中提取已选中路段
             self.optimized_segments = {}
             for yr in range(2026, 2026+years):
                 if has_multi and yr in self.demand_multi_year:
                     ydf = self.demand_multi_year[yr].copy()
-                    # 按优先级降序，取TopN
                     ydf = ydf.sort_values('优先级评分', ascending=False)
-                    yr_km = 0; selected = []
-                    target_km = yr_demands.get(yr,{}).get('reform', avg_reform)
+                    i = yr - 2026
+                    ratio = 1 - (balance/100)*(1 - (i/(years-1 if years>1 else 1)))
+                    yr_reform_km = max(0, avg_reform * ratio) if avg_reform>0 else 0
+                    selected = []; km = 0
                     for _, row in ydf.iterrows():
-                        if row.get('养护类型','') == '路面改造':
-                            if yr_km < target_km:
+                        if row.get('养护类型','') in ('路面改造','预防性养护'):
+                            if km < yr_reform_km:
                                 selected.append(row.to_dict())
-                                yr_km += row.get('路段长度(km)',0)
+                                km += row.get('路段长度(km)',0)
                     self.optimized_segments[yr] = selected
         else:
             # 无约束详细
