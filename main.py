@@ -1632,13 +1632,18 @@ class App(tk.Tk):
             if use_balance:
                 i = yr - 2026; ratio = 1 - (balance/100)*(1 - (i/(years-1 if years>1 else 1)))
                 rk *= ratio; rc *= ratio; pk *= ratio; pc *= ratio
-            # 估算PQI和优良路率
-            total_plan = rk + pk
-            est_pqi = min(95, int(85 + total_plan*0.03))
-            est_rate = min(98, int(80 + total_plan*0.08))
+            # 估算PQI和优良路率（优先使用需求快照）
+            if hasattr(self,'demand_snapshots') and yr in self.demand_snapshots:
+                snap = self.demand_snapshots[yr]
+                est_pqi = (snap['PQI']*snap['路段长度km']).sum()/snap['路段长度km'].sum() if 'PQI' in snap.columns else 0
+                est_rate = snap[snap['PQI']>=80]['路段长度km'].sum()/snap['路段长度km'].sum()*100 if 'PQI' in snap.columns else 0
+            else:
+                total_plan = rk + pk
+                est_pqi = min(95, int(85 + total_plan*0.03))
+                est_rate = min(98, int(80 + total_plan*0.08))
             pqi_ok = '✓' if est_pqi >= target_pqi else '✗'
             rate_ok = '✓' if est_rate >= target_rate else '✗'
-            contrast = f'PQI估{est_pqi}/{target_pqi}{pqi_ok} 优良路率估{est_rate}%/{target_rate}%{rate_ok}'
+            contrast = f'PQI估{est_pqi:.0f}/{target_pqi}{pqi_ok} 优良路率估{est_rate:.0f}%/{target_rate}%{rate_ok}'
             self.dp_tree.insert('','end',values=(f'{yr}年',f'{rk:.1f}',f'{rc:.0f}',f'{pk:.1f}',f'{pc:.0f}',
                 f'{rk+pk:.1f}',f'{rc+pc:.0f}',contrast))
         self.status_var.set(f'动态规划完成 - {years}年')
