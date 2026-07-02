@@ -1447,16 +1447,6 @@ class App(tk.Tk):
         self.dp_county_label = tk.Label(r0, text='', bg=THEME['bg'], fg=THEME['accent'], font=('Microsoft YaHei',9,'bold'))
         self.dp_county_label.pack(side='left', padx=10)
 
-        # 经济指标面板
-        card_econ = self._card(parent)
-        r_econ = self._row(card_econ)
-        tk.Button(r_econ, text='计算经济指标', command=self._run_invest_econ, bg=THEME['accent'],
-                 fg='white', font=('Microsoft YaHei',9), padx=10).pack(side='left')
-        cols_econ = ('道路类型','加权PQI','优良路率','交通量','路龄','年养护费(万)','每km成本','B/C','单位PQI提升','LCC-NPV(万)')
-        self.benefit_tree = ttk.Treeview(card_econ, columns=cols_econ, show='headings', height=4)
-        for ct in cols_econ: self.benefit_tree.heading(ct, text=ct); self.benefit_tree.column(ct, width=92, anchor='center')
-        self.benefit_tree.pack(fill='both', expand=True, pady=(5,0))
-
         # 多年动态优化
         card_opt = self._card(parent, '多年动态优化')
         c1 = self._row(card_opt)
@@ -1516,29 +1506,6 @@ class App(tk.Tk):
         self.pool_tree.configure(yscrollcommand=sv.set)
         self.pool_tree.pack(side='left', fill='both', expand=True)
         sv.pack(side='right', fill='y')
-
-    def _run_invest_econ(self):
-        df = self._get_data('全部')
-        if df.empty: return
-        if '年份' in df.columns: df = df[df['年份']==df['年份'].max()]
-        if '路段长度km' not in df.columns: df['路段长度km'] = 1.0
-        def rt(r):
-            s = str(r); return '国道' if s.startswith('G') else ('省道' if s.startswith('S') else '其他')
-        if '路线编码' in df.columns: df['道路类型'] = df['路线编码'].apply(rt)
-        from src.decision.cost_model import calc_weighted_pqi, calc_good_road_rate, calc_bcr_ratio, calc_unit_pqi_cost, calc_km_cost, calc_lcc
-        self.benefit_tree.delete(*self.benefit_tree.get_children())
-        for road in ['国道','省道']:
-            rd = df[df['道路类型']==road]
-            if rd.empty: continue
-            t = rd['路段长度km'].sum(); w = rd['路面宽度'].mean() if '路面宽度' in rd.columns else 7
-            avg_unit = 30*0.8 + 160*0.15 + 319*0.05
-            ac = t * 1000 * w * avg_unit / 10000
-            self.benefit_tree.insert('','end',values=(road, f'{calc_weighted_pqi(rd):.1f}', f'{calc_good_road_rate(rd):.1f}%',
-                int(rd['交通量'].mean()) if '交通量' in rd.columns else 5000,
-                f'{rd["路龄"].mean():.1f}' if '路龄' in rd.columns else '5.0',
-                f'{ac:.0f}', f'{calc_km_cost(ac,rd):.1f}', f'{calc_bcr_ratio(rd,ac):.2f}',
-                f'{calc_unit_pqi_cost(rd,ac):.2f}', f'{calc_lcc(rd)["NPV(万元)"]:.0f}'))
-        self.status_var.set('经济指标计算完成')
 
     def _calc_seg_decay(self, segs):
         """计算逐路段衰减系数 k = 0.015 × 路龄因子 × 交通量因子"""
