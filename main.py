@@ -1420,6 +1420,10 @@ class App(tk.Tk):
         for ct in cols_dp: self.dp_tree.heading(ct, text=ct); self.dp_tree.column(ct, width=130, anchor='center')
         self.dp_tree.pack(fill='both', expand=True, pady=(5,0))
 
+        card_conc = self._card(parent, '优化结论')
+        self.dp_text = tk.Text(card_conc, height=5, wrap='word', font=('Microsoft YaHei',10))
+        self.dp_text.pack(fill='both', expand=True)
+
         # 敏感性分析结果
         card_sens = self._card(parent, '目标可达性分析（预算↔PQI双向约束）')
         self.sens_tree = ttk.Treeview(card_sens, columns=('年预算(万)','最终PQI','优良路率(%)','累计效益(万)','B/C','达标'), show='headings', height=5)
