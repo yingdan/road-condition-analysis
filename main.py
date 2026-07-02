@@ -2395,7 +2395,69 @@ class App(tk.Tk):
         self.status_var.set('已恢复默认配置')
 
     # ══════════════════════════════════════════════════════════════════════════
-    #  页面5: 需求分析
+    #  工具方法
+    # ══════════════════════════════════════════════════════════════════════════
+    def _gen_year_projects(self):
+        yr = self.proj_year_var.get()
+        if hasattr(self,'demand_multi_year') and yr in self.demand_multi_year:
+            ydf = self.demand_multi_year[yr]; self.proj_detail_tree.delete(*self.proj_detail_tree.get_children())
+            for _, row in ydf.iterrows():
+                mt = row.get('养护类型','')
+                if mt in ('路面改造','预防性养护'):
+                    self.proj_detail_tree.insert('','end',values=(
+                        row.get('路线编码',''), row.get('路段起点',''), row.get('路段终点',''),
+                        f'{row.get("路段长度(km)",1):.3f}', row.get('路面类型',''), row.get('技术等级',''),
+                        f'{row.get("当前PQI",0):.1f}', '-', '-', mt))
+            self.status_var.set(f'{yr}年项目库已生成({len(ydf)}条)')
+        else: messagebox.showwarning('提示','请先执行需求分析')
+
+    def _run_total_optimization(self):
+        if self.demand_result_df is None or self.demand_result_df.empty:
+            messagebox.showwarning('提示','请先执行需求分析'); return
+
+    def _pool_refresh(self):
+        self.pool_tree.delete(*self.pool_tree.get_children())
+        if self.project_pool:
+            for p in self.project_pool.projects:
+                self.pool_tree.insert('','end',values=(p.project_id, p.route_code, p.maintenance_type or '',
+                    p.maintenance_year or '', f'{p.length:.2f}' if p.length else '',
+                    f'{p.estimated_cost:.2f}' if p.estimated_cost else '',
+                    f'{p.priority_score:.1f}' if p.priority_score else '', p.status or ''))
+
+    def _pool_import_demand(self):
+        if self.demand_result_df is None or self.demand_result_df.empty: return
+        if self.project_pool:
+            for _, row in self.demand_result_df.iterrows():
+                ln = row.get('路段长度(km)',1)
+                self.project_pool.add_project(MaintenanceProject(
+                    route_code=row.get('路线编码',''), segment_start=str(row.get('路段起点','')),
+                    segment_end=str(row.get('路段终点','')), length=ln,
+                    pavement_type=row.get('路面类型',''), current_condition={'PQI':row.get('当前PQI',80)},
+                    maintenance_type=row.get('养护类型',''), maintenance_year=2026,
+                    estimated_cost=row.get('估算费用(万元)',0), priority_score=row.get('优先级评分',0)))
+            self._pool_refresh()
+
+    def _pool_export(self):
+        if not self.project_pool or not self.project_pool.projects: return
+        path = filedialog.asksaveasfilename(defaultextension='.xlsx', filetypes=[('Excel','*.xlsx')], initialfile='项目库.xlsx')
+        if path: self.project_pool.to_excel(path); messagebox.showinfo('成功','已导出')
+
+    def _pool_import(self):
+        path = filedialog.askopenfilename(filetypes=[('Excel','*.xlsx')])
+        if path and self.project_pool: self.project_pool.from_excel(path); self._pool_refresh()
+
+    def _pool_clear(self):
+        if messagebox.askyesno('确认','清空项目库?'):
+            if self.project_pool: self.project_pool.projects.clear(); self._pool_refresh()
+
+    def _pool_gen_plan(self):
+        from src.decision.project_pool import generate_annual_plan
+        if not self.project_pool or not self.project_pool.projects: return
+        plan = generate_annual_plan(self.project_pool, 2026, 5000)
+        self._pool_refresh(); messagebox.showinfo('完成',f'{plan.get("项目数",0)}个项目')
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  页面7: GIS地图
     # ══════════════════════════════════════════════════════════════════════════
     def _build_page7(self, parent):
         self._section_title(parent, '🌍 GIS地图展示')
