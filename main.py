@@ -1680,6 +1680,21 @@ class App(tk.Tk):
                     f'{yd["prevent"]:.1f}',f'{yd["rcost"]:.0f}',f'{92:.0f}',f'{90:.1f}%'))
             self.dp_text.delete('1.0','end')
             self.dp_text.insert('end',f'资金均衡优化 | 均衡度{balance}% | 5年总需求改造{total_reform:.1f}km')
+            # 生成优化后的项目库
+            self.optimized_segments = {}
+            for yr in range(2026, 2026+years):
+                if has_multi and yr in self.demand_multi_year:
+                    ydf = self.demand_multi_year[yr].copy()
+                    # 按优先级降序，取TopN
+                    ydf = ydf.sort_values('优先级评分', ascending=False)
+                    yr_km = 0; selected = []
+                    target_km = yr_demands.get(yr,{}).get('reform', avg_reform)
+                    for _, row in ydf.iterrows():
+                        if row.get('养护类型','') == '路面改造':
+                            if yr_km < target_km:
+                                selected.append(row.to_dict())
+                                yr_km += row.get('路段长度(km)',0)
+                    self.optimized_segments[yr] = selected
         else:
             # 无约束详细
             cols = ('年份','改造需求km','改造经费(万)','预防需求km','预防经费(万)','合计km','合计经费(万)')
@@ -1707,7 +1722,18 @@ class App(tk.Tk):
 
     def _gen_year_projects(self):
         yr = self.proj_year_var.get()
-        if hasattr(self,'demand_multi_year') and yr in self.demand_multi_year:
+        # 优先使用优化后的结果
+        if hasattr(self,'optimized_segments') and yr in self.optimized_segments:
+            segs = self.optimized_segments[yr]
+            self.proj_detail_tree.delete(*self.proj_detail_tree.get_children())
+            for s in segs:
+                self.proj_detail_tree.insert('','end',values=(
+                    s.get('路线编码',''), s.get('路段起点',''), s.get('路段终点',''),
+                    f'{s.get("路段长度(km)",1):.3f}', s.get('路面类型',''), s.get('技术等级',''),
+                    f'{s.get("当前PQI",0):.1f}', s.get('PCI','-'), s.get('RQI','-'), s.get('养护类型','')))
+            self.status_var.set(f'{yr}年优化项目库已生成({len(segs)}条)')
+        elif hasattr(self,'demand_multi_year') and yr in self.demand_multi_year:
+            # 回退：从需求分析中按优先级取TopN
             ydf = self.demand_multi_year[yr]
             self.proj_detail_tree.delete(*self.proj_detail_tree.get_children())
             for _, row in ydf.iterrows():
@@ -1717,9 +1743,9 @@ class App(tk.Tk):
                         row.get('路线编码',''), row.get('路段起点',''), row.get('路段终点',''),
                         f'{row.get("路段长度(km)",1):.3f}', row.get('路面类型',''), row.get('技术等级',''),
                         f'{row.get("当前PQI",0):.1f}', '-', '-', mt))
-            self.status_var.set(f'{yr}年项目库已生成')
+            self.status_var.set(f'{yr}年需求项目库已生成')
         else:
-            messagebox.showwarning('提示','请先执行需求分析')
+            messagebox.showwarning('提示','请先执行需求分析和动态优化')
 
     def _pool_refresh(self):
         self.pool_tree.delete(*self.pool_tree.get_children())
