@@ -1563,7 +1563,7 @@ class App(tk.Tk):
         df = self._get_data(county)
         if df.empty: messagebox.showwarning('提示','请先加载数据'); return
         if self.demand_result_df is None or self.demand_result_df.empty:
-            messagebox.showwarning('提示','请先在需求分析中执行分析'); return
+            messagebox.showwarning('提示','请先在需求分析中执行分析\n\n如已改对策模型参数，需重新执行需求分析'); return
         import numpy as np
         self.dp_county_label.config(text=f'当前: {county}')
         if '年份' in df.columns: df = df[df['年份']==df['年份'].max()]
