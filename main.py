@@ -1266,9 +1266,9 @@ class App(tk.Tk):
 
         # 各线路加权均值表
         card_route = self._card(parent)
-        cols_route = ('路线编码','里程(km)','加权PQI','加权PCI','加权RQI')
+        cols_route = ('年份','路线编码','里程(km)','加权PQI')
         self.route_avg_tree = ttk.Treeview(card_route, columns=cols_route, show='headings', height=6)
-        for c in cols_route: self.route_avg_tree.heading(c, text=c); self.route_avg_tree.column(c, width=100, anchor='center')
+        for c in cols_route: self.route_avg_tree.heading(c, text=c); self.route_avg_tree.column(c, width=110, anchor='center')
         self.route_avg_tree.pack(fill='both', expand=True)
 
         card2 = self._card(parent, '养护需求列表', 3, expand=True)
@@ -1372,15 +1372,15 @@ class App(tk.Tk):
                 pk = ydf[ydf['养护类型']=='预防性养护']['路段长度(km)'].sum()
                 dk = ydf[ydf['养护类型']=='日常养护']['路段长度(km)'].sum() if '日常养护' in ydf['养护类型'].values else 0
                 self.demand_year_tree.insert('','end',values=(f'{yr}年',f'{rk:.1f}',f'{pk:.1f}',f'{dk:.1f}',f'{rk+pk+dk:.1f}'))
-            # 各线路加权均值
+            # 各线路加权均值（所有年份）
             self.route_avg_tree.delete(*self.route_avg_tree.get_children())
-            for route, rd in df.groupby('路线编码'):
-                t = rd['路段长度km'].sum()
-                if t > 0:
-                    wp = (rd['PQI']*rd['路段长度km']).sum()/t if 'PQI' in rd.columns else 0
-                    wc = (rd['PCI']*rd['路段长度km']).sum()/t if 'PCI' in rd.columns else 0
-                    wr = (rd['RQI']*rd['路段长度km']).sum()/t if 'RQI' in rd.columns else 0
-                    self.route_avg_tree.insert('','end',values=(route,f'{t:.1f}',f'{wp:.1f}',f'{wc:.1f}',f'{wr:.1f}'))
+            for yr in sorted(self.demand_multi_year.keys()):
+                ydf = self.demand_multi_year[yr]
+                for route, rd in ydf.groupby('路线编码'):
+                    t = rd['路段长度(km)'].sum()
+                    if t > 0:
+                        wp = (rd['当前PQI']*rd['路段长度(km)']).sum()/t if '当前PQI' in rd.columns else 0
+                        self.route_avg_tree.insert('','end',values=(f'{yr}年',route,f'{t:.1f}',f'{wp:.1f}'))
             self._refresh_demand_tree(result, ty)
             def km_of(df, mt):
                 s = df[df['养护类型']==mt]['路段长度(km)'].sum() if '路段长度(km)' in df.columns else len(df[df['养护类型']==mt])
