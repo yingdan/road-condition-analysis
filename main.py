@@ -1472,9 +1472,7 @@ class App(tk.Tk):
                 variable=self.dp_balance_var, length=150, showvalue=True).pack(side='left', padx=5)
         tk.Button(c1, text='执行优化', command=self._run_dynamic_planning,
                  bg=THEME['accent'], fg='white', font=('Microsoft YaHei',10), padx=12, cursor='hand2').pack(side='right')
-        tk.Button(c1, text='5年总量优化', command=self._run_total_optimization,
-                 bg=THEME['warning'], fg='white', font=('Microsoft YaHei',9), padx=8, cursor='hand2').pack(side='right', padx=5)
-        cols_dp = ('年份','约束PQI','改造km','预防km','合计km','投入(万)','路率%','无约束PQI','无约束改造','无约束路率%')
+        cols_dp = ('年份','改造需求(km)','预防需求(km)','计划改造(km)','计划预防(km)','计划投入(万元)')
         self.dp_tree = ttk.Treeview(card_opt, columns=cols_dp, show='headings', height=6)
         for ct in cols_dp: self.dp_tree.heading(ct, text=ct); self.dp_tree.column(ct, width=130, anchor='center')
         self.dp_tree.pack(fill='both', expand=True, pady=(5,0))
@@ -1671,15 +1669,17 @@ class App(tk.Tk):
                     yr_demands[yr] = {'reform':dm_reform_km,'rcost':0,'prevent':dm_prevent_km,'pcost':0}
                     total_reform += dm_reform_km; total_prevent += dm_prevent_km
             avg_reform = total_reform/years if years>0 else 0
+            self.dp_text.delete('1.0','end')
+            self.dp_text.insert('end',f'资金均衡优化 | 均衡度{balance}% | 5年总改造需求{total_reform:.1f}km\n')
             # 均衡分配：0=前重后轻, 50=均匀, 100=前轻后重
             for i, (yr, yd) in enumerate(sorted(yr_demands.items())):
                 ratio = 1 - (balance/100)*(1 - (i/(years-1 if years>1 else 1)))
-                yr_budget = max(0, avg_reform * ratio) if avg_reform>0 else 0
-                yr_reform = min(yd['reform'], yr_budget)
-                self.dp_tree.insert('','end',values=(f'{yr}年',f'{yd["reform"]:.1f}',f'{yr_reform:.1f}',
-                    f'{yd["prevent"]:.1f}',f'{yd["rcost"]:.0f}',f'{92:.0f}',f'{90:.1f}%'))
-            self.dp_text.delete('1.0','end')
-            self.dp_text.insert('end',f'资金均衡优化 | 均衡度{balance}% | 5年总需求改造{total_reform:.1f}km')
+                plan_reform = yd['reform'] * ratio
+                plan_prevent = yd['prevent'] * ratio
+                plan_cost = yd['rcost'] * ratio if yd['rcost']>0 else plan_reform*60
+                self.dp_tree.insert('','end',values=(f'{yr}年',f'{yd["reform"]:.1f}',f'{yd["prevent"]:.1f}',
+                    f'{plan_reform:.1f}',f'{plan_prevent:.1f}',f'{plan_cost:.0f}'))
+            self.dp_text.insert('end',f'均衡度{balance}%: year1={100-balance/2:.0f}%avg → year{years}=100%avg')
             # 优化后项目库：直接从均衡分配循环中提取已选中路段
             self.optimized_segments = {}
             for yr in range(2026, 2026+years):
