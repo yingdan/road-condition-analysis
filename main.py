@@ -1317,6 +1317,7 @@ class App(tk.Tk):
                 if hasattr(self,'callback_vars'):
                     for k,v in self.callback_vars.items(): cb[k] = v.get()
                 if prev_result is not None and not prev_result.empty and yr > ty:
+                    updated = 0
                     for _, row in prev_result.iterrows():
                         mt = row.get('养护类型',''); pt = row.get('路面类型','沥青路面')
                         if mt in ('路面改造','预防性养护'):
@@ -1324,7 +1325,10 @@ class App(tk.Tk):
                             mask = ((base_df['路线编码']==row['路线编码']) &
                                     (base_df['路段起点'].astype(str)==str(row['路段起点'])) &
                                     (base_df['路段终点'].astype(str)==str(row['路段终点'])))
-                            if mask.any(): base_df.loc[mask, 'PQI'] = new_pqi
+                            if mask.any():
+                                base_df.loc[mask, 'PQI'] = new_pqi
+                                updated += 1
+                    print(f'[DEMAND] Year {yr}: updated {updated} segments PQI after prev year repairs')
                 yr_df = analyze_demand(base_df, target_year=yr, decay_rates=dr, enabled=enabled_flags)
                 yr_df['路段长度(km)'] = yr_df.apply(lambda r: r.get('路段长度(km)',1), axis=1)
                 yr_df['养护类型'] = yr_df['养护类型'].fillna('日常养护')
