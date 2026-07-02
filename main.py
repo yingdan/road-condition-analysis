@@ -1533,6 +1533,10 @@ class App(tk.Tk):
         segs = df; total_km = segs['路段长度km'].sum()
         k_arr = self._calc_seg_decay(segs)
         pm = {v: i for i, v in enumerate(segs.index)}
+        # 第一年需求来源：优先使用需求分析结果中的改造里程
+        reform_km_demand = 0
+        if self.demand_result_df is not None and not self.demand_result_df.empty:
+            reform_km_demand = self.demand_result_df[self.demand_result_df['养护类型']=='路面改造']['路段长度(km)'].sum() if '路段长度(km)' in self.demand_result_df.columns else 0
         self.dp_tree.delete(*self.dp_tree.get_children())
 
         if use_constraint:
@@ -1544,7 +1548,13 @@ class App(tk.Tk):
             for yr in range(1, years+1):
                 budget = int(base_budget * (1 + growth) ** (yr - 1))
                 pqi_con = pqi_con * np.exp(-k_arr)
-                need = pqi_con < 80; rkm = 0; pkm = 0; remain = budget
+                need = pqi_con < 80
+                # 第一年优先使用需求分析结果，后续年份用模拟值
+                if yr == 1 and reform_km_demand > 0:
+                    needed_km = reform_km_demand
+                else:
+                    needed_km = segs['路段长度km'].values[need].sum()
+                rkm = 0; pkm = 0; remain = budget
                 if need.sum() > 0:
                     m = segs[need].copy(); dp = pqi_con[need]
                     m['cost'] = m['路段长度km'] * 1000 * m['路面宽度'] * 319 / 10000
