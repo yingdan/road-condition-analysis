@@ -1328,6 +1328,18 @@ class App(tk.Tk):
                 yr_df = analyze_demand(base_df, target_year=yr, decay_rates=dr, enabled=enabled_flags)
                 yr_df['路段长度(km)'] = yr_df.apply(lambda r: r.get('路段长度(km)',1), axis=1)
                 yr_df['养护类型'] = yr_df['养护类型'].fillna('日常养护')
+                # 计算费用（使用对策模型单价）
+                def calc(row):
+                    ln=row.get('路段长度(km)',1); mt=row.get('养护类型','日常养护'); pt=row.get('路面类型','沥青路面')
+                    tg=row.get('技术等级','二级公路')
+                    type_map={'路面改造':'结构性修复','预防性养护':'预防养护'}
+                    mt_k=type_map.get(mt,'日常养护')
+                    tg_k='一级' if '一' in str(tg) else ('二级' if '二' in str(tg) else '三级')
+                    pk=f'{mt_k}_{pt}_{tg_k}'
+                    pr=300
+                    if hasattr(self,'price_vars') and pk in self.price_vars: pr=self.price_vars[pk].get()
+                    return round(ln*1000*7*pr/10000,2)
+                yr_df['估算费用(万元)'] = yr_df.apply(calc, axis=1)
                 self.demand_multi_year[yr] = yr_df
                 prev_result = yr_df
                 rk = yr_df[yr_df['养护类型']=='路面改造']['路段长度(km)'].sum()
