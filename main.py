@@ -1095,11 +1095,11 @@ class App(tk.Tk):
             tk.Label(r, text=pt, width=10, bg=THEME['card']).pack(side='left')
             tk.Label(r, text=g, width=10, bg=THEME['card']).pack(side='left')
             for idx,dv in [('PCI低',plo),('PCI高',phi),('PQI',pqi)]:
+                v = tk.IntVar(value=dv); self.trigger_vars[f'{m}_{pt}_{g}_{idx}'] = v
+                ttk.Entry(r, textvariable=v, width=6).pack(side='left')
                 en = tk.BooleanVar(value=True)
                 self.trigger_vars[f'{m}_{pt}_{g}_{idx}_启用'] = en
                 tk.Checkbutton(r, text='', variable=en, bg=THEME['card'], width=2).pack(side='left')
-                v = tk.IntVar(value=dv); self.trigger_vars[f'{m}_{pt}_{g}_{idx}'] = v
-                ttk.Entry(r, textvariable=v, width=6).pack(side='left')
 
         # 三、回调值
         card2 = self._card(sf, '三、养护后PQI/PCI/RQI回调值')
