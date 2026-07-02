@@ -1264,11 +1264,12 @@ class App(tk.Tk):
         tk.Button(r, text='📥 导出', command=self._export_demand,
                  font=('Microsoft YaHei', 9), padx=8).pack(side='right')
 
-        # 各线路加权均值表
+        # 各线路加权均值表（年份横向）
         card_route = self._card(parent)
-        cols_route = ('年份','路线编码','里程(km)','加权PQI')
+        cols_route = ('路线编码','里程(km)', '26PQI','26PCI','26RQI','27PQI','27PCI','27RQI','28PQI','28PCI','28RQI','29PQI','29PCI','29RQI','30PQI','30PCI','30RQI')
         self.route_avg_tree = ttk.Treeview(card_route, columns=cols_route, show='headings', height=6)
-        for c in cols_route: self.route_avg_tree.heading(c, text=c); self.route_avg_tree.column(c, width=110, anchor='center')
+        for c in cols_route: self.route_avg_tree.heading(c, text=c); self.route_avg_tree.column(c, width=55, anchor='center')
+        self.route_avg_tree.column('路线编码', width=70); self.route_avg_tree.column('里程(km)', width=60)
         self.route_avg_tree.pack(fill='both', expand=True)
 
         card2 = self._card(parent, '养护需求列表', 3, expand=True)
@@ -1299,7 +1300,9 @@ class App(tk.Tk):
             from src.decision.performance_models import calibrate_exponential_model
             all_df = pd.concat(self.data_cache.values(), ignore_index=True)
             dr = calibrate_exponential_model(all_df)
-            # 传递用户启用的触发条件
+            # 确保PCI/RQI列存在
+            for c in ['PCI','RQI']:
+                if c not in df.columns: df[c] = df['PQI'] if 'PQI' in df.columns else 80
             enabled_flags = {}
             if hasattr(self,'trigger_vars'):
                 for k,v in self.trigger_vars.items():
@@ -1322,6 +1325,7 @@ class App(tk.Tk):
             import numpy as np
             base_df = df.copy()
             self.demand_multi_year = {}
+            self.demand_snapshots = {}  # 每年末的base_df快照（含PQI/PCI/RQI）
             county_name = self.demand_county_var.get() if hasattr(self,'demand_county_var') else '全部'
             prev_result = None
             for yr in range(ty, 2031):
@@ -1330,19 +1334,23 @@ class App(tk.Tk):
                 if hasattr(self,'callback_vars'):
                     for k,v in self.callback_vars.items(): cb[k] = v.get()
                 if prev_result is not None and not prev_result.empty and yr > ty:
-                    # 所有路段衰减1年
+                    # 所有路段 PQI/PCI/RQI 衰减1年
                     for idx in base_df.index:
                         ptype = str(base_df.at[idx,'路面类型']); tgrade = str(base_df.at[idx,'技术等级'])
-                        k_val = dr.get((ptype,tgrade),{}).get('PQI',0.015) or 0.015
-                        base_df.at[idx,'PQI'] = max(0, base_df.at[idx,'PQI']*np.exp(-k_val))
-                    # 修复路段回调PQI
-                    updated = 0
+                        dk = dr.get((ptype,tgrade),{})
+                        for col in ['PQI','PCI','RQI']:
+                            if col in base_df.columns:
+                                k_val = dk.get(col,0.015) or 0.015
+                                base_df.at[idx,col] = max(0, base_df.at[idx,col]*np.exp(-k_val))
+                    # 修复路段回调
                     for _, row in prev_result.iterrows():
                         mt = row.get('养护类型',''); pt = row.get('路面类型','沥青路面')
                         if mt in ('路面改造','预防性养护'):
-                            new_pqi = cb.get(f'{mt}_{pt}_PQI', 92 if mt=='路面改造' else 89)
                             m = ((base_df['路线编码']==row['路线编码'])&(base_df['路段起点'].astype(str)==str(row['路段起点']))&(base_df['路段终点'].astype(str)==str(row['路段终点'])))
-                            if m.any(): base_df.loc[m,'PQI'] = new_pqi; updated += 1
+                            if m.any():
+                                for col in ['PQI','PCI','RQI']:
+                                    new_val = cb.get(f'{mt}_{pt}_{col}', 92 if mt=='路面改造' else 89)
+                                    base_df.loc[m,col] = new_val
                 yr_df = analyze_demand(base_df, target_year=2026, decay_rates=dr, enabled=enabled_flags)
                 yr_df['路段长度(km)'] = yr_df.apply(lambda r: r.get('路段长度(km)',1), axis=1)
                 yr_df['养护类型'] = yr_df['养护类型'].fillna('日常养护')
@@ -1359,6 +1367,7 @@ class App(tk.Tk):
                     return round(ln*1000*7*pr/10000,2)
                 yr_df['估算费用(万元)'] = yr_df.apply(calc, axis=1)
                 self.demand_multi_year[yr] = yr_df
+                self.demand_snapshots[yr] = base_df.copy()  # 快照当前base_df
                 prev_result = yr_df
                 rk = yr_df[yr_df['养护类型']=='路面改造']['路段长度(km)'].sum()
                 pk = yr_df[yr_df['养护类型']=='预防性养护']['路段长度(km)'].sum()
@@ -1372,15 +1381,23 @@ class App(tk.Tk):
                 pk = ydf[ydf['养护类型']=='预防性养护']['路段长度(km)'].sum()
                 dk = ydf[ydf['养护类型']=='日常养护']['路段长度(km)'].sum() if '日常养护' in ydf['养护类型'].values else 0
                 self.demand_year_tree.insert('','end',values=(f'{yr}年',f'{rk:.1f}',f'{pk:.1f}',f'{dk:.1f}',f'{rk+pk+dk:.1f}'))
-            # 各线路加权均值（所有年份）
+            # 各线路加权均值（年份横向）
             self.route_avg_tree.delete(*self.route_avg_tree.get_children())
-            for yr in sorted(self.demand_multi_year.keys()):
-                ydf = self.demand_multi_year[yr]
-                for route, rd in ydf.groupby('路线编码'):
-                    t = rd['路段长度(km)'].sum()
-                    if t > 0:
-                        wp = (rd['当前PQI']*rd['路段长度(km)']).sum()/t if '当前PQI' in rd.columns else 0
-                        self.route_avg_tree.insert('','end',values=(f'{yr}年',route,f'{t:.1f}',f'{wp:.1f}'))
+            for route, group in df.groupby('路线编码'):
+                rd0 = group; t = rd0['路段长度km'].sum()
+                if t <= 0: continue
+                vals = [route, f'{t:.1f}']
+                for yr in range(ty, 2031):
+                    if yr in self.demand_snapshots:
+                        snap = self.demand_snapshots[yr]
+                        sr = snap[snap['路线编码']==route]
+                        for col in ['PQI','PCI','RQI']:
+                            if col in sr.columns and sr['路段长度km'].sum() > 0:
+                                wv = (sr[col]*sr['路段长度km']).sum()/sr['路段长度km'].sum()
+                                vals.append(f'{wv:.1f}')
+                            else:
+                                vals.append('-')
+                self.route_avg_tree.insert('','end',values=vals)
             self._refresh_demand_tree(result, ty)
             def km_of(df, mt):
                 s = df[df['养护类型']==mt]['路段长度(km)'].sum() if '路段长度(km)' in df.columns else len(df[df['养护类型']==mt])
