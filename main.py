@@ -1534,7 +1534,11 @@ class App(tk.Tk):
         segs = df; total_km = segs['路段长度km'].sum()
         k_arr = self._calc_seg_decay(segs)
         pm = {v: i for i, v in enumerate(segs.index)}
-        dm = self.demand_result_df  # 需求分析结果
+        dm = self.demand_result_df
+        # 基准年需求：直接从需求分析结果获取
+        dm_reform = dm[dm['养护类型']=='路面改造']
+        dm_reform_km = dm_reform['路段长度(km)'].sum() if '路段长度(km)' in dm.columns else 0
+        dm_prevent_km = dm[dm['养护类型']=='预防性养护']['路段长度(km)'].sum() if '路段长度(km)' in dm.columns else 0
         self.dp_tree.delete(*self.dp_tree.get_children())
 
         if use_constraint:
@@ -1543,11 +1547,11 @@ class App(tk.Tk):
             for c in cols: self.dp_tree.heading(c, text=c); self.dp_tree.column(c, width=93, anchor='center')
             pqi_arr = segs['PQI'].values.copy()
             for yr in range(1, years+1):
-                budget = int(base_budget * (1 + 0) ** (yr - 1))  # 固定预算
+                budget = int(base_budget * (1 + 0) ** (yr - 1))
                 pqi_arr = pqi_arr * np.exp(-k_arr)
-                # 用需求分析结果：筛选当前PQI<80的路段，按需求分析的优先级排序
                 need = pqi_arr < 80
-                demand_km = segs['路段长度km'].values[need].sum()  # 需要改造的
+                # 第一年用需求分析结果，后续年份用模拟值
+                demand_km = dm_reform_km if yr == 1 else segs['路段长度km'].values[need].sum()
                 rkm = 0; remain = budget
                 if need.sum() > 0:
                     m = segs[need].copy()
@@ -1588,8 +1592,8 @@ class App(tk.Tk):
                     f'{post_pqi:.1f}',f'{gr:.1f}%',f'{0}',f'{cost:.0f}'))
         self.dp_text.delete('1.0','end')
         mode = '有资金约束' if use_constraint else '无约束全修'
-        reform_total = dm[dm['养护类型']=='路面改造']['路段长度(km)'].sum() if '路段长度(km)' in dm.columns else 0
-        self.dp_text.insert('end',f'模式: {mode} | 需求分析改造总里程: {reform_total:.1f}km\n')
+        self.dp_text.insert('end',f'模式: {mode}\n')
+        self.dp_text.insert('end',f'需求分析: 改造{dm_reform_km:.1f}km + 预防{dm_prevent_km:.1f}km = 合计{dm_reform_km+dm_prevent_km:.1f}km\n')
         self.status_var.set(f'动态规划完成 - {years}年')
 
     def _run_sensitivity(self):
