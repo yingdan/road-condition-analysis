@@ -1379,16 +1379,13 @@ class App(tk.Tk):
         tk.Label(c1, text='年增长%：', bg=THEME['card'], font=('Microsoft YaHei',8)).pack(side='left')
         self.dp_growth_var = tk.IntVar(value=0)
         ttk.Entry(c1, textvariable=self.dp_growth_var, width=4).pack(side='left', padx=2)
-        self.dp_cluster_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(c1, text='连续路段聚类', variable=self.dp_cluster_var,
-                      bg=THEME['card'], font=('Microsoft YaHei',8)).pack(side='right', padx=5)
         tk.Button(c1, text='执行优化', command=self._run_dynamic_planning,
                  bg=THEME['accent'], fg='white', font=('Microsoft YaHei',10), padx=12, cursor='hand2').pack(side='right')
         tk.Button(c1, text='5年总量优化', command=self._run_total_optimization,
                  bg=THEME['warning'], fg='white', font=('Microsoft YaHei',9), padx=8, cursor='hand2').pack(side='right', padx=5)
         tk.Button(c1, text='敏感性分析', command=self._run_sensitivity,
                  bg=THEME['warning'], fg='white', font=('Microsoft YaHei',9), padx=8, cursor='hand2').pack(side='right', padx=3)
-        cols_dp = ('年份','年初PQI','需改造(km)','改造(km)','年投入(万)','改造后PQI','优良路率(%)','累计效益(万)')
+        cols_dp = ('年份','约束PQI','改造km','预防km','合计km','投入(万)','路率%','无约束PQI','无约束改造','无约束路率%')
         self.dp_tree = ttk.Treeview(card_opt, columns=cols_dp, show='headings', height=6)
         for ct in cols_dp: self.dp_tree.heading(ct, text=ct); self.dp_tree.column(ct, width=130, anchor='center')
         self.dp_tree.pack(fill='both', expand=True, pady=(5,0))
@@ -1519,8 +1516,7 @@ class App(tk.Tk):
     def _run_dynamic_planning(self):
         county = self.dp_county_var.get() if hasattr(self,'dp_county_var') else '全部'
         df = self._get_data(county)
-        if df.empty:
-            messagebox.showwarning('提示','请先加载数据'); return
+        if df.empty: messagebox.showwarning('提示','请先加载数据'); return
         import numpy as np
         self.dp_county_label.config(text=f'当前: {county}')
         if '年份' in df.columns: df = df[df['年份']==df['年份'].max()]
@@ -1531,64 +1527,39 @@ class App(tk.Tk):
         years = self.dp_years_var.get(); base_budget = self.budget_var.get()
         growth = self.dp_growth_var.get() / 100
         segs = df; total_km = segs['路段长度km'].sum()
-        k_arr = self._calc_seg_decay(segs)  # 逐路段衰减系数
-        pqi_arr = segs['PQI'].values.copy()
+        k_arr = self._calc_seg_decay(segs)
         pm = {v: i for i, v in enumerate(segs.index)}
-        self.status_var.set('正在运行动态规划...')
         self.dp_tree.delete(*self.dp_tree.get_children())
-        cum_b = 0; init_pqi = pqi_arr.mean()
+        pqi_con = segs['PQI'].values.copy()
+        pqi_unc = segs['PQI'].values.copy()
         for yr in range(1, years+1):
             budget = int(base_budget * (1 + growth) ** (yr - 1))
-            pqi_arr = pqi_arr * np.exp(-k_arr)  # 逐路段衰减
-            pre_repair_pqi = (pqi_arr * segs['路段长度km'].values).sum() / total_km  # 改造前
-            need = pqi_arr < 80; needed_km = segs['路段长度km'].values[need].sum()
-            rkm = 0; remain = budget
+            pqi_con = pqi_con * np.exp(-k_arr)
+            need = pqi_con < 80; rkm = 0; pkm = 0; remain = budget
             if need.sum() > 0:
-                use_cluster = self.dp_cluster_var.get() if hasattr(self,'dp_cluster_var') else False
-                if use_cluster:
-                    # 连续路段聚类模式
-                    clusters = self._cluster_segments(segs, need)
-                    if clusters:
-                        for cl in clusters:
-                            cl['benefit'] = 0
-                            for seg_idx in cl['segments']:
-                                row = segs.loc[seg_idx]
-                                cl['benefit'] += row['交通量'] * 365 * row['路段长度km'] * (92 - pqi_arr[pm[seg_idx]]) * 0.015 * row['车道数'] / 10000
-                            cl['bcr'] = cl['benefit'] / cl['cost'] if cl['cost'] > 0 else 0
-                    clusters.sort(key=lambda x: x['bcr'], reverse=True)
-                    for cl in clusters:
-                        if cl['cost'] <= remain:
-                            remain -= cl['cost']; rkm += cl['length']
-                            cum_b += cl['benefit'] / 1.05 ** yr
-                            for seg_idx in cl['segments']:
-                                ap = pm.get(seg_idx, -1)
-                                if ap >= 0: pqi_arr[ap] = 92
-                else:
-                    # 逐段独立模式
-                    m = segs[need].copy()
-                    dp = pqi_arr[need]
-                    m['cost'] = m['路段长度km'] * 1000 * m['路面宽度'] * 319 / 10000
-                    m['benefit'] = m['交通量'] * 365 * m['路段长度km'] * (92-dp) * 0.015 * m['车道数'] / 10000
-                    m['bcr'] = m['benefit'] / m['cost']
-                    m = m.sort_values('bcr', ascending=False)
-                    for df_idx, row in m.iterrows():
-                        if row['cost'] <= remain:
-                            remain -= row['cost']; rkm += row['路段长度km']
-                            ap = pm.get(df_idx, -1)
-                            if ap >= 0: pqi_arr[ap] = 92
-                            cum_b += row['benefit'] / 1.05 ** yr
-            wp = (pqi_arr * segs['路段长度km'].values).sum() / total_km
-            gr = segs['路段长度km'].values[pqi_arr>=80].sum() / total_km * 100
-            self.dp_tree.insert('','end',values=(f'{yr}年',f'{pre_repair_pqi:.1f}',f'{needed_km:.1f}',f'{rkm:.1f}',
-                f'{budget}',f'{wp:.1f}',f'{gr:.1f}%',f'{cum_b:.0f}'))
-        # 无约束参考
-        pqi_final = pqi_arr
-        need_after = pqi_final < 80
-        total_need = segs['路段长度km'].values[need_after].sum()
-        total_need_cost = (segs.loc[need_after,'路段长度km']*1000*segs.loc[need_after,'路面宽度']*319/10000).sum() if total_need>0 else 0
+                m = segs[need].copy(); dp = pqi_con[need]
+                m['cost'] = m['路段长度km'] * 1000 * m['路面宽度'] * 319 / 10000
+                m['benefit'] = m['交通量'] * 365 * m['路段长度km'] * (92-dp) * 0.015 * m['车道数'] / 10000
+                m['bcr'] = m['benefit'] / m['cost']
+                m = m.sort_values('bcr', ascending=False)
+                for df_idx, row in m.iterrows():
+                    if row['cost'] <= remain:
+                        remain -= row['cost']; rkm += row['路段长度km']
+                        ap = pm.get(df_idx, -1)
+                        if ap >= 0: pqi_con[ap] = 92
+            con_pqi = (pqi_con * segs['路段长度km'].values).sum() / total_km
+            con_gr = segs['路段长度km'].values[pqi_con>=80].sum() / total_km * 100
+            con_total = rkm + pkm
+            pqi_unc = pqi_unc * np.exp(-k_arr)
+            need_unc = pqi_unc < 80
+            urkm = segs['路段长度km'].values[need_unc].sum()
+            if need_unc.sum() > 0: pqi_unc[need_unc] = 92
+            unc_pqi = (pqi_unc * segs['路段长度km'].values).sum() / total_km
+            unc_gr = segs['路段长度km'].values[pqi_unc>=80].sum() / total_km * 100
+            self.dp_tree.insert('','end',values=(f'{yr}年',f'{con_pqi:.1f}',f'{rkm:.1f}',f'{pkm:.1f}',
+                f'{con_total:.1f}',f'{budget}',f'{con_gr:.1f}%',f'{unc_pqi:.1f}',f'{urkm:.1f}',f'{unc_gr:.1f}%'))
         self.dp_text.delete('1.0','end')
-        self.dp_text.insert('end',f'资金约束下: {years}年累计效益{cum_b:.0f}万 | 剩余未修{total_need:.1f}km\n')
-        self.dp_text.insert('end',f'无约束全修: 需改{total_need:.1f}km 需{total_need_cost:.0f}万\n')
+        self.dp_text.insert('end',f'约束: 年预算{base_budget}万 | 无约束: PQI<80全修\n')
         self.status_var.set(f'动态规划完成 - {years}年')
 
     def _run_sensitivity(self):
