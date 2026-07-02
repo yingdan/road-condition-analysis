@@ -1472,7 +1472,7 @@ class App(tk.Tk):
         self.dp_growth_var = tk.IntVar(value=0)
         ttk.Entry(c1, textvariable=self.dp_growth_var, width=4).pack(side='left', padx=2)
         self.dp_constraint_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(c1, text='资金约束', variable=self.dp_constraint_var,
+        tk.Checkbutton(c1, text='资金均衡', variable=self.dp_constraint_var,
                       bg=THEME['card'], font=('Microsoft YaHei',8)).pack(side='right', padx=5)
         tk.Button(c1, text='执行优化', command=self._run_dynamic_planning,
                  bg=THEME['accent'], fg='white', font=('Microsoft YaHei',10), padx=12, cursor='hand2').pack(side='right')
@@ -1696,7 +1696,7 @@ class App(tk.Tk):
                 self.dp_tree.insert('','end',values=(f'{yr}年',f'{rkm:.1f}',f'{rcost:.0f}',
                     f'{pkm:.1f}',f'{pcost:.0f}',f'{rkm+pkm:.1f}',f'{rcost+pcost:.0f}'))
         self.dp_text.delete('1.0','end')
-        mode = '有资金约束' if use_constraint else '无约束全修'
+        mode = '资金均衡优化' if use_constraint else '无约束全修'
         self.dp_text.insert('end',f'模式: {mode}\n')
         self.dp_text.insert('end',f'需求分析: 改造{dm_reform_km:.1f}km + 预防{dm_prevent_km:.1f}km = 合计{dm_reform_km+dm_prevent_km:.1f}km\n')
         self.status_var.set(f'动态规划完成 - {years}年')
