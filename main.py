@@ -1648,9 +1648,11 @@ class App(tk.Tk):
         cols = ('年份','改造需求(km)','改造经费(万)','预防需求(km)','预防经费(万)','合计(km)','合计经费(万)','目标对比')
         self.dp_tree['columns'] = cols
         for c in cols: self.dp_tree.heading(c, text=c); self.dp_tree.column(c, width=88, anchor='center')
-        target_pqi = 90
-        if hasattr(self,'target_vars') and 'mid_国道_PQI' in self.target_vars:
-            target_pqi = self.target_vars['mid_国道_PQI'].get()
+        target_pqi = 90; target_rate = 88
+        if hasattr(self,'target_vars'):
+            target_pqi = self.target_vars.get('mid_国道_PQI', tk.IntVar(value=90)).get()
+            target_rate = self.target_vars.get('mid_国道_优良路率', tk.IntVar(value=88)).get()
+        self.dp_tree.column('目标对比', width=180)
         for yr in range(2026, 2026+years):
             if has_multi and yr in self.demand_multi_year:
                 ydf = self.demand_multi_year[yr]
@@ -1663,9 +1665,13 @@ class App(tk.Tk):
             if use_balance:
                 i = yr - 2026; ratio = 1 - (balance/100)*(1 - (i/(years-1 if years>1 else 1)))
                 rk *= ratio; rc *= ratio; pk *= ratio; pc *= ratio
-            est = min(95, int(85 + (rk+pk)*0.03))
-            ok = 'V' if est >= target_pqi else 'X'
-            contrast = f'估PQI{est} vs {target_pqi}:{ok}'
+            # 估算PQI和优良路率
+            total_plan = rk + pk
+            est_pqi = min(95, int(85 + total_plan*0.03))
+            est_rate = min(98, int(80 + total_plan*0.08))
+            pqi_ok = '✓' if est_pqi >= target_pqi else '✗'
+            rate_ok = '✓' if est_rate >= target_rate else '✗'
+            contrast = f'PQI估{est_pqi}/{target_pqi}{pqi_ok} 路率估{est_rate}%/{target_rate}%{rate_ok}'
             self.dp_tree.insert('','end',values=(f'{yr}年',f'{rk:.1f}',f'{rc:.0f}',f'{pk:.1f}',f'{pc:.0f}',
                 f'{rk+pk:.1f}',f'{rc+pc:.0f}',contrast))
         self.status_var.set(f'动态规划完成 - {years}年')
