@@ -1306,6 +1306,12 @@ class App(tk.Tk):
             result['估算费用(万元)'] = result.apply(cc, axis=1)
             result['养护类型'] = result['养护类型'].fillna('日常养护')
             self.demand_result_df = result
+            # 同时计算5年需求（供动态规划使用）
+            base_df = df.copy() if not result.empty else df
+            self.demand_multi_year = {ty: result}
+            for yr in range(ty+1, 2031):
+                yr_df = analyze_demand(base_df, target_year=yr, decay_rates=dr, enabled=enabled_flags)
+                self.demand_multi_year[yr] = yr_df
             self._refresh_demand_tree(result, ty)
             def km_of(df, mt):
                 s = df[df['养护类型']==mt]['路段长度(km)'].sum() if '路段长度(km)' in df.columns else len(df[df['养护类型']==mt])
@@ -1534,11 +1540,11 @@ class App(tk.Tk):
         segs = df; total_km = segs['路段长度km'].sum()
         k_arr = self._calc_seg_decay(segs)
         pm = {v: i for i, v in enumerate(segs.index)}
-        dm = self.demand_result_df
-        # 基准年需求：直接从需求分析结果获取
-        dm_reform = dm[dm['养护类型']=='路面改造']
-        dm_reform_km = dm_reform['路段长度(km)'].sum() if '路段长度(km)' in dm.columns else 0
-        dm_prevent_km = dm[dm['养护类型']=='预防性养护']['路段长度(km)'].sum() if '路段长度(km)' in dm.columns else 0
+        # 优先使用多年度需求分析结果
+        has_multi = hasattr(self,'demand_multi_year') and self.demand_multi_year
+        dm_year1 = self.demand_multi_year.get(2026, self.demand_result_df) if has_multi else self.demand_result_df
+        dm_reform_km = dm_year1[dm_year1['养护类型']=='路面改造']['路段长度(km)'].sum() if '路段长度(km)' in dm_year1.columns else 0
+        dm_prevent_km = dm_year1[dm_year1['养护类型']=='预防性养护']['路段长度(km)'].sum() if '路段长度(km)' in dm_year1.columns else 0
         self.dp_tree.delete(*self.dp_tree.get_children())
 
         if use_constraint:
@@ -1550,8 +1556,13 @@ class App(tk.Tk):
                 budget = int(base_budget * (1 + 0) ** (yr - 1))
                 pqi_arr = pqi_arr * np.exp(-k_arr)
                 need = pqi_arr < 80
-                # 第一年用需求分析结果，后续年份用模拟值
-                demand_km = dm_reform_km if yr == 1 else segs['路段长度km'].values[need].sum()
+                # 从多年度需求分析获取该年改造里程（如有）
+                cal_year = 2025 + yr
+                if has_multi and cal_year in self.demand_multi_year:
+                    ydf = self.demand_multi_year[cal_year]
+                    demand_km = ydf[ydf['养护类型']=='路面改造']['路段长度(km)'].sum() if '路段长度(km)' in ydf.columns else segs['路段长度km'].values[need].sum()
+                else:
+                    demand_km = segs['路段长度km'].values[need].sum()
                 rkm = 0; remain = budget
                 if need.sum() > 0:
                     m = segs[need].copy()
