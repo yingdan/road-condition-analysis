@@ -1487,26 +1487,6 @@ class App(tk.Tk):
         self.proj_detail_tree.pack(side='left', fill='both', expand=True)
         sv_pd.pack(side='right', fill='y')
 
-        # 项目库
-        card = self._card(parent, '工程项目库')
-        r = self._row(card)
-        tk.Button(r, text='📥 从需求导入', command=self._pool_import_demand,
-                 bg=THEME['accent'], fg='white', font=('Microsoft YaHei', 9), padx=10, cursor='hand2').pack(side='left', padx=3)
-        tk.Button(r, text='📤 导出', command=self._pool_export, font=('Microsoft YaHei', 9), padx=8).pack(side='left', padx=3)
-        tk.Button(r, text='📥 导入', command=self._pool_import, font=('Microsoft YaHei', 9), padx=8).pack(side='left', padx=3)
-        tk.Button(r, text='🗑️ 清空', command=self._pool_clear, font=('Microsoft YaHei', 9), padx=8).pack(side='left', padx=3)
-        tk.Button(r, text='📋 年度计划', command=self._pool_gen_plan, font=('Microsoft YaHei', 9), padx=8).pack(side='left', padx=3)
-
-        card2 = self._card(parent, '项目列表', 3, expand=True)
-        cols = ('项目编号','路线编码','养护类型','计划年度','里程(km)','估算费用(万元)','优先级','状态')
-        self.pool_tree = ttk.Treeview(card2, columns=cols, show='headings', height=15)
-        ws = {'项目编号':140,'路线编码':85,'养护类型':80,'计划年度':65,'里程(km)':65,'估算费用(万元)':90,'优先级':55,'状态':60}
-        for c in cols: self.pool_tree.heading(c, text=c); self.pool_tree.column(c, width=ws.get(c,65), anchor='center')
-        sv = ttk.Scrollbar(card2, orient='vertical', command=self.pool_tree.yview)
-        self.pool_tree.configure(yscrollcommand=sv.set)
-        self.pool_tree.pack(side='left', fill='both', expand=True)
-        sv.pack(side='right', fill='y')
-
     def _calc_seg_decay(self, segs):
         """计算逐路段衰减系数 k = 0.015 × 路龄因子 × 交通量因子"""
         import numpy as np
@@ -2390,14 +2370,22 @@ class App(tk.Tk):
         yr = self.proj_year_var.get()
         if hasattr(self,'demand_multi_year') and yr in self.demand_multi_year:
             ydf = self.demand_multi_year[yr]; self.proj_detail_tree.delete(*self.proj_detail_tree.get_children())
+            # 从snapshots获取PCI/RQI值
+            snap = self.demand_snapshots.get(yr) if hasattr(self,'demand_snapshots') else None
             for _, row in ydf.iterrows():
                 mt = row.get('养护类型','')
                 if mt in ('路面改造','预防性养护'):
+                    pci = '-'; rqi = '-'
+                    if snap is not None and 'PCI' in snap.columns:
+                        m = ((snap['路线编码']==row['路线编码'])&(snap['路段起点'].astype(str)==str(row['路段起点']))&(snap['路段终点'].astype(str)==str(row['路段终点'])))
+                        if m.any():
+                            pci = f'{snap.loc[m,"PCI"].values[0]:.1f}'
+                            rqi = f'{snap.loc[m,"RQI"].values[0]:.1f}' if 'RQI' in snap.columns else '-'
                     self.proj_detail_tree.insert('','end',values=(
                         row.get('路线编码',''), row.get('路段起点',''), row.get('路段终点',''),
                         f'{row.get("路段长度(km)",1):.3f}', row.get('路面类型',''), row.get('技术等级',''),
-                        f'{row.get("当前PQI",0):.1f}', '-', '-', mt))
-            self.status_var.set(f'{yr}年项目库已生成({len(ydf)}条)')
+                        f'{row.get("当前PQI",0):.1f}', pci, rqi, mt))
+            self.status_var.set(f'{yr}年项目库已生成')
         else: messagebox.showwarning('提示','请先执行需求分析')
 
     def _run_total_optimization(self):
