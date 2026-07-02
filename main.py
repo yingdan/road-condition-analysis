@@ -1306,15 +1306,36 @@ class App(tk.Tk):
             result['估算费用(万元)'] = result.apply(cc, axis=1)
             result['养护类型'] = result['养护类型'].fillna('日常养护')
             self.demand_result_df = result
-            # 同时计算5年需求（供动态规划使用）
-            base_df = df.copy() if not result.empty else df
+            # 多年需求模拟：逐年传递修复后的PQI
+            import numpy as np
+            base_df = df.copy()
             self.demand_multi_year = {ty: result}
             county_name = self.demand_county_var.get() if hasattr(self,'demand_county_var') else '全部'
+            prev_result = result
             for yr in range(ty+1, 2031):
+                # 根据上年结果更新PQI：修复路段PQI=92, 其余自然衰减
+                if not prev_result.empty and '路段长度(km)' in prev_result.columns:
+                    pqi_map = {}
+                    for _, row in prev_result.iterrows():
+                        key = (row.get('路线编码',''), row.get('路段起点',''), row.get('路段终点',''))
+                        mt = row.get('养护类型','')
+                        if mt == '路面改造':
+                            pqi_map[key] = 92
+                        elif mt == '预防性养护':
+                            pqi_map[key] = 89
+                    for idx in base_df.index:
+                        key = (base_df.at[idx,'路线编码'], str(base_df.at[idx,'路段起点']), str(base_df.at[idx,'路段终点']))
+                        if key in pqi_map:
+                            base_df.at[idx,'PQI'] = pqi_map[key]
+                        else:
+                            # 自然衰减
+                            k_val = dr.get((str(base_df.at[idx,'路面类型']), str(base_df.at[idx,'技术等级'])), {}).get('PQI', 0.015) or 0.015
+                            base_df.at[idx,'PQI'] = max(0, base_df.at[idx,'PQI'] * np.exp(-k_val))
                 yr_df = analyze_demand(base_df, target_year=yr, decay_rates=dr, enabled=enabled_flags)
                 yr_df['路段长度(km)'] = yr_df.apply(lambda r: r.get('路段长度(km)',1), axis=1)
                 yr_df['养护类型'] = yr_df['养护类型'].fillna('日常养护')
                 self.demand_multi_year[yr] = yr_df
+                prev_result = yr_df
                 rk = yr_df[yr_df['养护类型']=='路面改造']['路段长度(km)'].sum()
                 pk = yr_df[yr_df['养护类型']=='预防性养护']['路段长度(km)'].sum()
                 print(f'[DEMAND-{county_name}] {yr}: reform={rk:.1f}km prevent={pk:.1f}km (total={len(yr_df)}条)')
