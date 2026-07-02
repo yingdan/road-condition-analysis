@@ -1595,11 +1595,12 @@ class App(tk.Tk):
         cols = ('年份','改造需求(km)','改造经费(万)','预防需求(km)','预防经费(万)','合计(km)','合计经费(万)','目标对比')
         self.dp_tree['columns'] = cols
         for c in cols: self.dp_tree.heading(c, text=c); self.dp_tree.column(c, width=88, anchor='center')
+        self.dp_tree.column('目标对比', width=220)
+        # 读取国道/省道各自目标
         target_pqi = 90; target_rate = 88
         if hasattr(self,'target_vars'):
             target_pqi = self.target_vars.get('mid_国道_PQI', tk.IntVar(value=90)).get()
             target_rate = self.target_vars.get('mid_国道_优良路率', tk.IntVar(value=88)).get()
-        self.dp_tree.column('目标对比', width=180)
         for yr in range(2026, 2026+years):
             if has_multi and yr in self.demand_multi_year:
                 ydf = self.demand_multi_year[yr]
@@ -1626,15 +1627,22 @@ class App(tk.Tk):
                         if key in repaired:
                             pt = row.get('路面类型','沥青路面')
                             ydf.at[idx,'当前PQI'] = cb.get(f'路面改造_{pt}_PQI',92)
-                pqi_vals = ydf['当前PQI'].values if '当前PQI' in ydf.columns else ydf['PQI'].values
-                km_vals = ydf['路段长度(km)'].values
-                est_pqi = (pqi_vals * km_vals).sum() / km_vals.sum()
-                est_rate = km_vals[pqi_vals>=80].sum() / km_vals.sum() * 100
+                def rt(rc): return 'G' if str(rc).startswith('G') else ('S' if str(rc).startswith('S') else 'O')
+                ydf['路型'] = ydf['路线编码'].apply(rt)
+                parts = []
+                for rtype, label, tpqi, trate in [('G','国道',target_pqi,target_rate),('S','省道',target_pqi,target_rate)]:
+                    rd = ydf[ydf['路型']==rtype]
+                    if rd.empty: continue
+                    pqi_vals = rd['当前PQI'].values if '当前PQI' in rd.columns else rd['PQI'].values
+                    km_vals = rd['路段长度(km)'].values
+                    ep = (pqi_vals*km_vals).sum()/km_vals.sum()
+                    er = km_vals[pqi_vals>=80].sum()/km_vals.sum()*100
+                    pok = '✓' if round(ep)>=tpqi else '✗'
+                    rok = '✓' if round(er)>=trate else '✗'
+                    parts.append(f'{label}PQI{ep:.1f}/{tpqi}{pok}路率{er:.1f}%/{trate}%{rok}')
+                contrast = ' '.join(parts)
             else:
-                est_pqi = 0; est_rate = 0
-            pqi_ok = '✓' if round(est_pqi) >= target_pqi else '✗'
-            rate_ok = '✓' if round(est_rate) >= target_rate else '✗'
-            contrast = f'PQI{est_pqi:.2f}/{target_pqi}{pqi_ok} 路率{est_rate:.2f}%/{target_rate}%{rate_ok}'
+                contrast = '无数据'
             self.dp_tree.insert('','end',values=(f'{yr}年',f'{rk:.1f}',f'{rc:.0f}',f'{pk:.1f}',f'{pc:.0f}',
                 f'{rk+pk:.1f}',f'{rc+pc:.0f}',contrast))
         self.status_var.set(f'动态规划完成 - {years}年')
