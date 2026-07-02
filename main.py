@@ -1748,6 +1748,26 @@ class App(tk.Tk):
         else:
             messagebox.showwarning('提示','请先执行需求分析和动态优化')
 
+    def _run_total_optimization(self):
+        """短中长三期目标总量优化"""
+        if self.demand_result_df is None or self.demand_result_df.empty:
+            messagebox.showwarning('提示','请先执行需求分析'); return
+        targets = {'short':('短期(1年)',90),'mid':('中期(5年)',92),'long':('长期(10年)',94)}
+        if hasattr(self,'target_vars'):
+            for h in targets:
+                t = self.target_vars.get(f'{h}_国道_PQI', tk.IntVar(value=targets[h][1])).get()
+                targets[h] = (targets[h][0], t)
+        self.dp_text.delete('1.0','end')
+        total_all = 0
+        for h, (name, tp) in targets.items():
+            rk = self.demand_result_df[self.demand_result_df['养护类型']=='路面改造']['路段长度(km)'].sum()
+            rc = self.demand_result_df[self.demand_result_df['养护类型']=='路面改造']['估算费用(万元)'].sum() if '估算费用(万元)' in self.demand_result_df.columns else 0
+            pk = self.demand_result_df[self.demand_result_df['养护类型']=='预防性养护']['路段长度(km)'].sum()
+            total_all += rc
+            self.dp_text.insert('end',f'{name}: PQI≥{tp} | 改造{rk:.1f}km/{rc:.0f}万 | 预防{pk:.1f}km\n')
+        self.dp_text.insert('end',f'\n5年总量估算: {total_all*5:.0f}万元')
+        self.status_var.set('总量优化完成')
+
     def _pool_refresh(self):
         self.pool_tree.delete(*self.pool_tree.get_children())
         if self.project_pool:
