@@ -1632,15 +1632,39 @@ class App(tk.Tk):
             if use_balance:
                 i = yr - 2026; ratio = 1 - (balance/100)*(1 - (i/(years-1 if years>1 else 1)))
                 rk *= ratio; rc *= ratio; pk *= ratio; pc *= ratio
-            # 估算PQI和优良路率（优先使用需求快照）
-            if hasattr(self,'demand_snapshots') and yr in self.demand_snapshots:
-                snap = self.demand_snapshots[yr]
-                est_pqi = (snap['PQI']*snap['路段长度km']).sum()/snap['路段长度km'].sum() if 'PQI' in snap.columns else 0
-                est_rate = snap[snap['PQI']>=80]['路段长度km'].sum()/snap['路段长度km'].sum()*100 if 'PQI' in snap.columns else 0
+            # 根据优化结果估算PQI和优良路率
+            if hasattr(self,'optimized_segments') and yr in self.optimized_segments and self.optimized_segments[yr]:
+                selected = self.optimized_segments[yr]
+                repaired_keys = set()
+                cb = {}
+                if hasattr(self,'callback_vars'):
+                    for k,v in self.callback_vars.items(): cb[k] = v.get()
+                for s in selected:
+                    repaired_keys.add((s['路线编码'], str(s['路段起点']), str(s['路段终点'])))
+                # 遍历需求数据，修复的→回调PQI，未修的→保留原PQI
+                if has_multi and yr in self.demand_multi_year:
+                    ydf = self.demand_multi_year[yr].copy()
+                    updated_pqi = []
+                    updated_km = []
+                    for _, row in ydf.iterrows():
+                        km = row.get('路段长度(km)',1)
+                        key = (row['路线编码'], str(row['路段起点']), str(row['路段终点']))
+                        if key in repaired_keys:
+                            pt = row.get('路面类型','沥青路面')
+                            updated_pqi.append(cb.get(f'路面改造_{pt}_PQI',92))
+                        else:
+                            updated_pqi.append(row.get('当前PQI',80))
+                        updated_km.append(km)
+                    pqi_arr = np.array(updated_pqi); km_arr = np.array(updated_km)
+                    est_pqi = (pqi_arr * km_arr).sum() / km_arr.sum()
+                    est_rate = km_arr[pqi_arr>=80].sum() / km_arr.sum() * 100
+                else:
+                    est_pqi = 0; est_rate = 0
             else:
+                # 无优化结果时用线性估算
                 total_plan = rk + pk
-                est_pqi = min(95, int(85 + total_plan*0.03))
-                est_rate = min(98, int(80 + total_plan*0.08))
+                est_pqi = min(95, int(85 + total_plan*0.02))
+                est_rate = min(98, int(78 + total_plan*0.05))
             pqi_ok = '✓' if est_pqi >= target_pqi else '✗'
             rate_ok = '✓' if est_rate >= target_rate else '✗'
             contrast = f'PQI估{est_pqi:.0f}/{target_pqi}{pqi_ok} 优良路率估{est_rate:.0f}%/{target_rate}%{rate_ok}'
