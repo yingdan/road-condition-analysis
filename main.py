@@ -1309,9 +1309,15 @@ class App(tk.Tk):
             # 同时计算5年需求（供动态规划使用）
             base_df = df.copy() if not result.empty else df
             self.demand_multi_year = {ty: result}
+            county_name = self.demand_county_var.get() if hasattr(self,'demand_county_var') else '全部'
             for yr in range(ty+1, 2031):
                 yr_df = analyze_demand(base_df, target_year=yr, decay_rates=dr, enabled=enabled_flags)
+                yr_df['路段长度(km)'] = yr_df.apply(lambda r: r.get('路段长度(km)',1), axis=1)
+                yr_df['养护类型'] = yr_df['养护类型'].fillna('日常养护')
                 self.demand_multi_year[yr] = yr_df
+                rk = yr_df[yr_df['养护类型']=='路面改造']['路段长度(km)'].sum()
+                pk = yr_df[yr_df['养护类型']=='预防性养护']['路段长度(km)'].sum()
+                print(f'[DEMAND-{county_name}] {yr}: reform={rk:.1f}km prevent={pk:.1f}km (total={len(yr_df)}条)')
             self._refresh_demand_tree(result, ty)
             def km_of(df, mt):
                 s = df[df['养护类型']==mt]['路段长度(km)'].sum() if '路段长度(km)' in df.columns else len(df[df['养护类型']==mt])
@@ -1545,6 +1551,13 @@ class App(tk.Tk):
         dm_year1 = self.demand_multi_year.get(2026, self.demand_result_df) if has_multi else self.demand_result_df
         dm_reform_km = dm_year1[dm_year1['养护类型']=='路面改造']['路段长度(km)'].sum() if '路段长度(km)' in dm_year1.columns else 0
         dm_prevent_km = dm_year1[dm_year1['养护类型']=='预防性养护']['路段长度(km)'].sum() if '路段长度(km)' in dm_year1.columns else 0
+        print(f'[DP] multi_year keys: {list(self.demand_multi_year.keys()) if has_multi else "NONE"}')
+        print(f'[DP] Year 2026 reform_km from dm={dm_reform_km:.1f} prevent={dm_prevent_km:.1f}')
+        if has_multi:
+            for y, ydf in self.demand_multi_year.items():
+                rk = ydf[ydf['养护类型']=='路面改造']['路段长度(km)'].sum()
+                pk = ydf[ydf['养护类型']=='预防性养护']['路段长度(km)'].sum()
+                print(f'[DP]   {y}: reform={rk:.1f}km prevent={pk:.1f}km')
         self.dp_tree.delete(*self.dp_tree.get_children())
 
         if use_constraint:
