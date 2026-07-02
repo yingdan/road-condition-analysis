@@ -1477,10 +1477,6 @@ class App(tk.Tk):
         for ct in cols_dp: self.dp_tree.heading(ct, text=ct); self.dp_tree.column(ct, width=130, anchor='center')
         self.dp_tree.pack(fill='both', expand=True, pady=(5,0))
 
-        card_conc = self._card(parent, '优化结论')
-        self.dp_text = tk.Text(card_conc, height=3, wrap='word', font=('Microsoft YaHei',10))
-        self.dp_text.pack(fill='both', expand=True)
-
         # 年度项目库
         card_proj = self._card(parent, '年度项目库（路面改造+预防养护）', expand=True)
         rp = self._row(card_proj)
@@ -1669,8 +1665,6 @@ class App(tk.Tk):
                     yr_demands[yr] = {'reform':dm_reform_km,'rcost':0,'prevent':dm_prevent_km,'pcost':0}
                     total_reform += dm_reform_km; total_prevent += dm_prevent_km
             avg_reform = total_reform/years if years>0 else 0
-            self.dp_text.delete('1.0','end')
-            self.dp_text.insert('end',f'资金均衡优化 | 均衡度{balance}% | 5年总改造需求{total_reform:.1f}km\n')
             # 均衡分配：0=前重后轻, 50=均匀, 100=前轻后重
             for i, (yr, yd) in enumerate(sorted(yr_demands.items())):
                 ratio = 1 - (balance/100)*(1 - (i/(years-1 if years>1 else 1)))
@@ -1679,7 +1673,6 @@ class App(tk.Tk):
                 plan_cost = yd['rcost'] * ratio if yd['rcost']>0 else plan_reform*60
                 self.dp_tree.insert('','end',values=(f'{yr}年',f'{yd["reform"]:.1f}',f'{yd["prevent"]:.1f}',
                     f'{plan_reform:.1f}',f'{plan_prevent:.1f}',f'{plan_cost:.0f}'))
-            self.dp_text.insert('end',f'均衡度{balance}%: year1={100-balance/2:.0f}%avg → year{years}=100%avg')
             # 优化后项目库：直接从均衡分配循环中提取已选中路段
             self.optimized_segments = {}
             for yr in range(2026, 2026+years):
@@ -1711,13 +1704,8 @@ class App(tk.Tk):
                 else:
                     rk=dm_reform_km;rc=0;pk=dm_prevent_km;pc=0
                 self.dp_tree.insert('','end',values=(f'{yr}年',f'{rk:.1f}',f'{rc:.0f}',f'{pk:.1f}',f'{pc:.0f}',f'{rk+pk:.1f}',f'{rc+pc:.0f}'))
-            self.dp_text.delete('1.0','end')
-            self.dp_text.insert('end',f'无约束全修模式')
 
-        self.dp_text.delete('1.0','end')
         mode = '资金均衡优化' if use_balance else '无约束全修'
-        self.dp_text.insert('end',f'模式: {mode}\n')
-        self.dp_text.insert('end',f'需求分析: 改造{dm_reform_km:.1f}km + 预防{dm_prevent_km:.1f}km = 合计{dm_reform_km+dm_prevent_km:.1f}km\n')
         self.status_var.set(f'动态规划完成 - {years}年')
 
 
@@ -1757,15 +1745,12 @@ class App(tk.Tk):
             for h in targets:
                 t = self.target_vars.get(f'{h}_国道_PQI', tk.IntVar(value=targets[h][1])).get()
                 targets[h] = (targets[h][0], t)
-        self.dp_text.delete('1.0','end')
         total_all = 0
         for h, (name, tp) in targets.items():
             rk = self.demand_result_df[self.demand_result_df['养护类型']=='路面改造']['路段长度(km)'].sum()
             rc = self.demand_result_df[self.demand_result_df['养护类型']=='路面改造']['估算费用(万元)'].sum() if '估算费用(万元)' in self.demand_result_df.columns else 0
             pk = self.demand_result_df[self.demand_result_df['养护类型']=='预防性养护']['路段长度(km)'].sum()
             total_all += rc
-            self.dp_text.insert('end',f'{name}: PQI≥{tp} | 改造{rk:.1f}km/{rc:.0f}万 | 预防{pk:.1f}km\n')
-        self.dp_text.insert('end',f'\n5年总量估算: {total_all*5:.0f}万元')
         self.status_var.set('总量优化完成')
 
     def _pool_refresh(self):
