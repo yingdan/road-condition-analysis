@@ -1277,6 +1277,12 @@ class App(tk.Tk):
         self.demand_summary = tk.Label(parent, text='', bg=THEME['bg'], fg=THEME['text'], font=('Microsoft YaHei', 9))
         self.demand_summary.pack(anchor='w', padx=20, pady=3)
 
+        # 多年需求汇总表
+        cols_yr = ('年份','改造(km)','预防(km)','日常(km)','合计(km)')
+        self.demand_year_tree = ttk.Treeview(parent, columns=cols_yr, show='headings', height=6)
+        for c in cols_yr: self.demand_year_tree.heading(c, text=c); self.demand_year_tree.column(c, width=90, anchor='center')
+        self.demand_year_tree.pack(fill='x', padx=20, pady=5)
+
     def _run_demand(self):
         df = self._get_data(self.demand_county_var.get())
         if df.empty: return
@@ -1348,7 +1354,16 @@ class App(tk.Tk):
                 prev_result = yr_df
                 rk = yr_df[yr_df['养护类型']=='路面改造']['路段长度(km)'].sum()
                 pk = yr_df[yr_df['养护类型']=='预防性养护']['路段长度(km)'].sum()
+                dk = yr_df[yr_df['养护类型']=='日常养护']['路段长度(km)'].sum() if '日常养护' in yr_df['养护类型'].values else 0
                 print(f'[DEMAND-{county_name}] {yr}: reform={rk:.1f}km prevent={pk:.1f}km (total={len(yr_df)}条)')
+            # 填充多年汇总表
+            self.demand_year_tree.delete(*self.demand_year_tree.get_children())
+            for yr in sorted(self.demand_multi_year.keys()):
+                ydf = self.demand_multi_year[yr]
+                rk = ydf[ydf['养护类型']=='路面改造']['路段长度(km)'].sum()
+                pk = ydf[ydf['养护类型']=='预防性养护']['路段长度(km)'].sum()
+                dk = ydf[ydf['养护类型']=='日常养护']['路段长度(km)'].sum() if '日常养护' in ydf['养护类型'].values else 0
+                self.demand_year_tree.insert('','end',values=(f'{yr}年',f'{rk:.1f}',f'{pk:.1f}',f'{dk:.1f}',f'{rk+pk+dk:.1f}'))
             self._refresh_demand_tree(result, ty)
             def km_of(df, mt):
                 s = df[df['养护类型']==mt]['路段长度(km)'].sum() if '路段长度(km)' in df.columns else len(df[df['养护类型']==mt])
