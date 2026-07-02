@@ -1335,7 +1335,8 @@ class App(tk.Tk):
                                 base_df.loc[mask, 'PQI'] = new_pqi
                                 updated += 1
                     print(f'[DEMAND] Year {yr}: updated {updated} segments PQI after prev year repairs')
-                yr_df = analyze_demand(base_df, target_year=yr, decay_rates=dr, enabled=enabled_flags)
+                # 每年传target_year=2026，让analyze_demand做1年衰减（base_df中PQI已反映上年末状态）
+                yr_df = analyze_demand(base_df, target_year=2026, decay_rates=dr, enabled=enabled_flags)
                 yr_df['路段长度(km)'] = yr_df.apply(lambda r: r.get('路段长度(km)',1), axis=1)
                 yr_df['养护类型'] = yr_df['养护类型'].fillna('日常养护')
                 # 计算费用（使用对策模型单价）
