@@ -1652,8 +1652,8 @@ class App(tk.Tk):
                 est_rate = km_vals[pqi_vals>=80].sum() / km_vals.sum() * 100
             else:
                 est_pqi = 0; est_rate = 0
-            pqi_ok = '✓' if est_pqi >= target_pqi else '✗'
-            rate_ok = '✓' if est_rate >= target_rate else '✗'
+            pqi_ok = '✓' if round(est_pqi) >= target_pqi else '✗'
+            rate_ok = '✓' if round(est_rate) >= target_rate else '✗'
             contrast = f'PQI{est_pqi:.0f}/{target_pqi}{pqi_ok} 路率{est_rate:.0f}%/{target_rate}%{rate_ok}'
             self.dp_tree.insert('','end',values=(f'{yr}年',f'{rk:.1f}',f'{rc:.0f}',f'{pk:.1f}',f'{pc:.0f}',
                 f'{rk+pk:.1f}',f'{rc+pc:.0f}',contrast))
