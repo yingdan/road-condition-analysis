@@ -1323,19 +1323,19 @@ class App(tk.Tk):
                 if hasattr(self,'callback_vars'):
                     for k,v in self.callback_vars.items(): cb[k] = v.get()
                 if prev_result is not None and not prev_result.empty and yr > ty:
+                    # 所有路段衰减1年
+                    for idx in base_df.index:
+                        ptype = str(base_df.at[idx,'路面类型']); tgrade = str(base_df.at[idx,'技术等级'])
+                        k_val = dr.get((ptype,tgrade),{}).get('PQI',0.015) or 0.015
+                        base_df.at[idx,'PQI'] = max(0, base_df.at[idx,'PQI']*np.exp(-k_val))
+                    # 修复路段回调PQI
                     updated = 0
                     for _, row in prev_result.iterrows():
                         mt = row.get('养护类型',''); pt = row.get('路面类型','沥青路面')
                         if mt in ('路面改造','预防性养护'):
                             new_pqi = cb.get(f'{mt}_{pt}_PQI', 92 if mt=='路面改造' else 89)
-                            mask = ((base_df['路线编码']==row['路线编码']) &
-                                    (base_df['路段起点'].astype(str)==str(row['路段起点'])) &
-                                    (base_df['路段终点'].astype(str)==str(row['路段终点'])))
-                            if mask.any():
-                                base_df.loc[mask, 'PQI'] = new_pqi
-                                updated += 1
-                    print(f'[DEMAND] Year {yr}: updated {updated} segments PQI after prev year repairs')
-                # 每年传target_year=2026，让analyze_demand做1年衰减（base_df中PQI已反映上年末状态）
+                            m = ((base_df['路线编码']==row['路线编码'])&(base_df['路段起点'].astype(str)==str(row['路段起点']))&(base_df['路段终点'].astype(str)==str(row['路段终点'])))
+                            if m.any(): base_df.loc[m,'PQI'] = new_pqi; updated += 1
                 yr_df = analyze_demand(base_df, target_year=2026, decay_rates=dr, enabled=enabled_flags)
                 yr_df['路段长度(km)'] = yr_df.apply(lambda r: r.get('路段长度(km)',1), axis=1)
                 yr_df['养护类型'] = yr_df['养护类型'].fillna('日常养护')
