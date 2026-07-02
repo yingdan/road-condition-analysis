@@ -1316,7 +1316,7 @@ class App(tk.Tk):
                 cb = {}
                 if hasattr(self,'callback_vars'):
                     for k,v in self.callback_vars.items(): cb[k] = v.get()
-                if not prev_result.empty and yr > ty:
+                if prev_result is not None and not prev_result.empty and yr > ty:
                     for _, row in prev_result.iterrows():
                         mt = row.get('养护类型',''); pt = row.get('路面类型','沥青路面')
                         if mt in ('路面改造','预防性养护'):
